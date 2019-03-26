@@ -28,6 +28,23 @@ namespace daggr {
 
       using functor_type = F;
 
+      template <class Input>
+      struct is_invocable : meta::is_invocable<F, Input> {};
+      template <class Input>
+      static constexpr auto is_invocable_v = is_invocable<Input>::value;
+      template <class Input>
+      struct invoke_result : meta::invoke_result<F, Input> {};
+      template <class Input>
+      using invoke_result_t = typename invoke_result<Input>::type;
+      template <class Input>
+      struct is_applicable : meta::is_applicable<F, Input> {};
+      template <class Input>
+      static constexpr auto is_applicable_v = is_applicable<Input>::value;
+      template <class Input>
+      struct apply_result : meta::apply_result<F, Input> {};
+      template <class Input>
+      using apply_result_t = typename apply_result<Input>::type;
+
       /*----- Lifecycle Functions -----*/
 
       template <class U = F, class =
@@ -56,7 +73,11 @@ namespace daggr {
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Input, class Then, class Terminate>
+      template <class Scheduler, class Input, class Then, class Terminate, class =
+        std::enable_if_t<
+          meta::sequence_is_invocable_v<Input, functor_type, Then>
+        >
+      >
       void execute(Scheduler&, Input&& in, Then&& next, Terminate&&) {
         meta::invoke(std::forward<Then>(next), meta::invoke(func, std::forward<Input>(in)));
       }

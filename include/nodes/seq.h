@@ -8,6 +8,7 @@
 /*----- Local Includes -----*/
 
 #include "comp.h"
+#include "../meta/function_traits.h"
 #include "../meta/lifecycle_traits.h"
 
 /*----- Type Declarations -----*/
@@ -24,12 +25,68 @@ namespace daggr {
     static constexpr auto nothrow_partially_constructible_v =
         meta::is_nothrow_forward_constructible_v<P> && std::is_nothrow_default_constructible_v<C>;
 
+    // Helper meta-functions to write our invocability in terms of our children.
+    template <class F, class Input>
+    struct is_invocable_impl : F::template is_invocable<Input> {
+      using canonical_type = std::bool_constant<F::template is_invocable<Input>::value>;
+    };
+    template <class F, class Input>
+    struct invoke_result_impl : F::template invoke_result<Input> {};
+
+    // Helper meta-functions to write our applicability in terms of our children.
+    template <class F, class Input>
+    struct is_applicable_impl : F::template is_applicable<Input> {
+      using canonical_type = std::bool_constant<F::template is_applicable<Input>::value>;
+    };
+    template <class F, class Input>
+    struct apply_result_impl : F::template apply_result<Input> {};
+
     public:
 
       /*----- Public Types -----*/
 
       using producer_type = Producer;
       using consumer_type = Consumer;
+
+      template <class Input>
+      struct is_invocable :
+        meta::sequence_is_walkable<
+          is_invocable_impl,
+          invoke_result_impl,
+          Input,
+          Producer,
+          Consumer
+        >
+      {};
+      template <class Input>
+      static constexpr auto is_invocable_v = is_invocable<Input>::value;
+
+      template <class Input>
+      struct invoke_result {
+        using type = typename is_invocable<Input>::result_type;
+      };
+      template <class Input>
+      using invoke_result_t = typename invoke_result<Input>::type;
+
+      template <class Input>
+      struct is_applicable :
+        meta::sequence_is_walkable<
+          is_applicable_impl,
+          apply_result_impl,
+          Input,
+          Producer,
+          Consumer
+        >
+      {};
+      template <class Input>
+      static constexpr auto is_applicable_v = is_applicable<Input>::value;
+
+      template <class Input>
+      struct apply_result {
+        using type = typename is_applicable<Input>::result_type;
+      };
+      template <class Input>
+      using apply_result_t = typename apply_result<Input>::type;
 
       /*----- Lifecycle Functions -----*/
 

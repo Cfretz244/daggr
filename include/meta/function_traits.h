@@ -331,6 +331,8 @@ namespace daggr::meta {
     }
   }
 
+  // FIXME:
+  // Will currently attempt to instantiate user templates with std::tuples of meta::none
   template <class Functor, class Arg, class =
     std::enable_if_t<
       meta::is_applicable_v<Functor, Arg>
@@ -400,11 +402,15 @@ namespace daggr::meta {
     // Case: The previous operation was ill-formed, sequence is invalid.
     template <template <class...> class Validation,
              template <class...> class Calculation, class Argument, class... Functors>
-    struct sequence_is_walkable_impl<Validation, Calculation, std::false_type, Argument, Functors...> : std::false_type {};
+    struct sequence_is_walkable_impl<Validation, Calculation, std::false_type, Argument, Functors...> : std::false_type {
+      using result_type = Argument;
+    };
 
     // Case: Sequence is fully consumed, all operations were well-formed. Sequence is valid.
     template <template <class...> class Validation, template <class...> class Calculation, class Argument>
-    struct sequence_is_walkable_impl<Validation, Calculation, std::true_type, Argument> : std::true_type {};
+    struct sequence_is_walkable_impl<Validation, Calculation, std::true_type, Argument> : std::true_type {
+      using result_type = Argument;
+    };
 
     // Case: We must attempt to perform the next operation in the sequence, general recursive case.
     template <template <class...> class Validation,
@@ -417,10 +423,21 @@ namespace daggr::meta {
         typename Calculation<Functor, Argument>::type,
         Functors...
       >
-    {};
+    {
+      using result_type =
+        typename sequence_is_walkable_impl<
+          Validation, 
+          Calculation,
+          typename Validation<Functor, Argument>::canonical_type,
+          typename Calculation<Functor, Argument>::type,
+          Functors...
+        >::result_type;
+    };
 
   }
 
+  // Meta-function calculates whether some abstract operation is valid across
+  // a sequence of function types.
   template <template <class...> class Validation,
            template <class...> class Calculation, class Argument, class... Functors>
   struct sequence_is_walkable :
@@ -431,12 +448,35 @@ namespace daggr::meta {
       Argument,
       Functors...
     >
-  {};
+  {
+    using result_type =
+      typename detail::sequence_is_walkable_impl<
+        Validation,
+        Calculation,
+        std::true_type, 
+        Argument,
+        Functors...
+      >::result_type;
+  };
   template <template <class...> class Validation,
            template <class...> class Calculation, class Argument, class... Functors>
   constexpr auto sequence_is_walkable_v =
       sequence_is_walkable<Validation, Calculation, Argument, Functors...>::value;
 
+  template <template <class...> class Validation,
+           template <class...> class Calculation, class Argument, class... Functors>
+  struct sequence_is_walkable_result {
+    using type =
+      typename sequence_is_walkable<Validation, Calculation, Argument, Functors...>::result_type;
+  };
+  template <template <class...> class Validation,
+           template <class...> class Calculation, class Argument, class... Functors>
+  using sequence_is_walkable_result_t =
+      typename sequence_is_walkable_result<Validation, Calculation, Argument, Functors...>::type;
+
+  // Meta-function calculates whether a sequence of function types can be invoked
+  // in sequence, passing the result of each to the next, while editing out meta::none
+  // and void types when they appear.
   template <class Argument, class... Functors>
   struct sequence_is_invocable :
     sequence_is_walkable<
@@ -450,6 +490,16 @@ namespace daggr::meta {
   constexpr auto sequence_is_invocable_v = sequence_is_invocable<Argument, Functors...>::value;
 
   template <class Argument, class... Functors>
+  struct sequence_is_invocable_result {
+    using type = typename sequence_is_invocable<Argument, Functors...>::result_type;
+  };
+  template <class Argument, class... Functors>
+  using sequence_is_invocable_result_t = typename sequence_is_invocable_result<Argument, Functors...>::type;
+
+  // Meta-function calculates whether a sequence of function types can be applied
+  // in sequence, passing the result of each to the next, while editing out meta::none
+  // and void types when they appear, with some custom transformations defined around std::tuple.
+  template <class Argument, class... Functors>
   struct sequence_is_applicable :
     sequence_is_walkable<
       meta::is_applicable,
@@ -460,6 +510,13 @@ namespace daggr::meta {
   {};
   template <class Argument, class... Functors>
   constexpr auto sequence_is_applicable_v = sequence_is_applicable<Argument, Functors...>::value;
+
+  template <class Argument, class... Functors>
+  struct sequence_is_applicable_result {
+    using type = typename sequence_is_applicable<Argument, Functors...>::result_type;
+  };
+  template <class Argument, class... Functors>
+  using sequence_is_applicable_result_t = typename sequence_is_applicable_result<Argument, Functors...>::type;
 
 }
 
