@@ -4,6 +4,7 @@
 /*----- System Includes -----*/
 
 #include <tuple>
+#include <string>
 #include <functional>
 #include <type_traits>
 
@@ -15,14 +16,16 @@ namespace daggr::meta {
   struct none {};
   constexpr none none_v {};
 
+  // Struct represents a non-fatal error in a context where a valid type cannot be instantiated.
+  struct nonesuch {
+    nonesuch() = delete;
+    nonesuch(nonesuch const&) = delete;
+    nonesuch(nonesuch&&) = delete;
+    ~nonesuch() = delete;
+  };
+
   // Detection idiom implementation.
   namespace detail {
-    struct nonesuch {
-      nonesuch() = delete;
-      nonesuch(nonesuch const&) = delete;
-      nonesuch(nonesuch&&) = delete;
-      ~nonesuch() = delete;
-    };
     template <class Default, class AlwaysVoid, template <class...> class Op, class... Args>
     struct detector {
       using value_t = std::false_type;
@@ -37,11 +40,11 @@ namespace daggr::meta {
 
   // Detection idiom.
   template <template <class...> class Op, class... Args>
-  using is_detected = typename detail::detector<detail::nonesuch, void, Op, Args...>::value_t;
+  using is_detected = typename detail::detector<nonesuch, void, Op, Args...>::value_t;
   template <template <class...> class Op, class... Args>
   constexpr auto is_detected_v = is_detected<Op, Args...>::value;
   template <template <class...> class Op, class... Args>
-  using detected_t = typename detail::detector<detail::nonesuch, void, Op, Args...>::type;
+  using detected_t = typename detail::detector<nonesuch, void, Op, Args...>::type;
   template <class Default, template <class...> class Op, class... Args>
   using detected_or = detail::detector<Default, void, Op, Args...>;
   template <class Default, template <class...> class Op, class... Args>
@@ -366,17 +369,97 @@ namespace daggr::meta {
   // Invocation must be known to be well formed prior to instantiation.
   template <class Functor, class... Args>
   struct invoke_result {
-    using type = decltype(meta::invoke(std::declval<Functor>(), std::declval<Args>()...));
+    template <class F, class... As>
+    static decltype(meta::invoke(std::declval<Functor>(), std::declval<As>()...)) invocation_calculation(std::true_type);
+    template <class, class...>
+    static nonesuch invocation_calculation(std::false_type);
+    using type = decltype(invocation_calculation<Functor, Args...>(meta::is_invocable<Functor, Args...> {}));
   };
   template <class Functor, class... Args>
   using invoke_result_t = typename invoke_result<Functor, Args...>::type;
 
   template <class Functor, class Arg>
   struct apply_result {
-    using type = decltype(meta::apply(std::declval<Functor>(), std::declval<Arg>()));
+    template <class F, class A>
+    static decltype(meta::apply(std::declval<Functor>(), std::declval<Arg>())) application_calculation(std::true_type);
+    template <class, class>
+    static nonesuch application_calculation(std::false_type);
+    using type = decltype(application_calculation<Functor, Arg>(meta::is_applicable<Functor, Arg> {}));
   };
   template <class Functor, class Arg>
   using apply_result_t = typename apply_result<Functor, Arg>::type;
+
+  namespace detail {
+
+    // Meta-function to calculate whether an operation is defined for all members
+    // of some arbitrary sequence.
+    template <template <class...> class Validation,
+             template <class...> class Calculation, class Success, class Argument, class... Functors>
+    struct sequence_is_walkable_impl;
+
+    // Case: The previous operation was ill-formed, sequence is invalid.
+    template <template <class...> class Validation,
+             template <class...> class Calculation, class Argument, class... Functors>
+    struct sequence_is_walkable_impl<Validation, Calculation, std::false_type, Argument, Functors...> : std::false_type {};
+
+    // Case: Sequence is fully consumed, all operations were well-formed. Sequence is valid.
+    template <template <class...> class Validation, template <class...> class Calculation, class Argument>
+    struct sequence_is_walkable_impl<Validation, Calculation, std::true_type, Argument> : std::true_type {};
+
+    // Case: We must attempt to perform the next operation in the sequence, general recursive case.
+    template <template <class...> class Validation,
+             template <class...> class Calculation, class Argument, class Functor, class... Functors>
+    struct sequence_is_walkable_impl<Validation, Calculation, std::true_type, Argument, Functor, Functors...> :
+      sequence_is_walkable_impl<
+        Validation,
+        Calculation,
+        typename Validation<Functor, Argument>::canonical_type,
+        typename Calculation<Functor, Argument>::type,
+        Functors...
+      >
+    {};
+
+  }
+
+  template <template <class...> class Validation,
+           template <class...> class Calculation, class Argument, class... Functors>
+  struct sequence_is_walkable :
+    detail::sequence_is_walkable_impl<
+      Validation,
+      Calculation,
+      std::true_type,
+      Argument,
+      Functors...
+    >
+  {};
+  template <template <class...> class Validation,
+           template <class...> class Calculation, class Argument, class... Functors>
+  constexpr auto sequence_is_walkable_v =
+      sequence_is_walkable<Validation, Calculation, Argument, Functors...>::value;
+
+  template <class Argument, class... Functors>
+  struct sequence_is_invocable :
+    sequence_is_walkable<
+      meta::is_invocable,
+      meta::invoke_result,
+      Argument,
+      Functors...
+    >
+  {};
+  template <class Argument, class... Functors>
+  constexpr auto sequence_is_invocable_v = sequence_is_invocable<Argument, Functors...>::value;
+
+  template <class Argument, class... Functors>
+  struct sequence_is_applicable :
+    sequence_is_walkable<
+      meta::is_applicable,
+      meta::apply_result,
+      Argument,
+      Functors...
+    >
+  {};
+  template <class Argument, class... Functors>
+  constexpr auto sequence_is_applicable_v = sequence_is_applicable<Argument, Functors...>::value;
 
 }
 
