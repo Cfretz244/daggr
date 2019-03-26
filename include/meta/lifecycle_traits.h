@@ -1,5 +1,5 @@
-#ifndef DAGGER_LIFECYCLE_TRAITS_H
-#define DAGGER_LIFECYCLE_TRAITS_H
+#ifndef DAGGR_LIFECYCLE_TRAITS_H
+#define DAGGR_LIFECYCLE_TRAITS_H
 
 /*----- System Includes -----*/
 
@@ -7,7 +7,7 @@
 
 /*----- Type Declarations -----*/
 
-namespace dagger::meta {
+namespace daggr::meta {
 
   template <class... Ts>
   struct are_default_constructible :

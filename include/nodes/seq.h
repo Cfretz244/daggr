@@ -1,5 +1,5 @@
-#ifndef DAGGER_SEQUENCE_H
-#define DAGGER_SEQUENCE_H
+#ifndef DAGGR_SEQUENCE_H
+#define DAGGR_SEQUENCE_H
 
 /*----- System Includes -----*/
 
@@ -7,18 +7,18 @@
 
 /*----- Local Includes -----*/
 
-#include "node.h"
+#include "comp.h"
 #include "../meta/lifecycle_traits.h"
 
 /*----- Type Declarations -----*/
 
-namespace dagger {
+namespace daggr {
 
   template <class F>
-  class node;
+  class comp;
 
   template <class Producer, class Consumer>
-  class sequence : meta::copy_guard<Producer, Consumer>, meta::move_guard<Producer, Consumer> {
+  class seq {
 
     template <class P, class C>
     static constexpr auto nothrow_partially_constructible_v =
@@ -38,7 +38,7 @@ namespace dagger {
           meta::are_default_constructible_v<P, C>
         >
       >
-      sequence() noexcept(meta::are_nothrow_default_constructible_v<P, C>) {}
+      seq() noexcept(meta::are_nothrow_default_constructible_v<P, C>) {}
       template <class P, class =
         std::enable_if_t<
           std::is_same_v<
@@ -47,7 +47,7 @@ namespace dagger {
           >
         >
       >
-      explicit sequence(P&& prod) noexcept(nothrow_partially_constructible_v<P, Consumer>) :
+      explicit seq(P&& prod) noexcept(nothrow_partially_constructible_v<P, Consumer>) :
         prod(std::forward<P>(prod))
       {}
       template <class P, class C, class =
@@ -63,39 +63,47 @@ namespace dagger {
           >
         >
       >
-      explicit sequence(P&& prod, C&& cons) noexcept(meta::are_nothrow_forward_constructible_v<P, C>) :
+      explicit seq(P&& prod, C&& cons) noexcept(meta::are_nothrow_forward_constructible_v<P, C>) :
         prod(std::forward<P>(prod)),
         cons(std::forward<C>(cons))
       {}
 
-      sequence(sequence const&) = default;
-      sequence(sequence&&) = default;
-      ~sequence() = default;
+      seq(seq const&) = default;
+      seq(seq&&) = default;
+      ~seq() = default;
 
       /*----- Operators -----*/
 
-      sequence& operator =(sequence const&) = default;
-      sequence& operator =(sequence&&) = default;
+      seq& operator =(seq const&) = default;
+      seq& operator =(seq&&) = default;
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Input, class Then, class Cleanup>
-      void execute(Scheduler& sched, Input&& in, Then&& next, Cleanup&& clean) {
-
+      template <class Scheduler, class Input, class Then, class Terminate>
+      void execute(Scheduler& sched, Input&& in, Then&& next, Terminate&& term) {
+        prod.execute(sched, std::forward<Input>(in),
+            [this, &sched, next = std::forward<Then>(next), term] (auto&& tmp) {
+          cons.execute(sched,
+              std::forward<decltype(tmp)>(tmp), std::move(next), std::move(term));
+        }, std::forward<Terminate>(term));
       }
 
       template <class Then>
-      sequence<sequence, node<Then>> then(Then&& next) const&
+      seq<seq, comp<Then>> then(Then&& next) const&
         noexcept(meta::is_nothrow_forward_constructible_v<Then>)
       {
-        return sequence {*this, node {std::forward<Then>(next)}};
+        return seq<seq, comp<Then>> {*this, comp {std::forward<Then>(next)}};
       }
 
       template <class Then>
-      sequence<sequence, node<Then>> then(Then&& next) &&
+      seq<seq, comp<Then>> then(Then&& next) &&
         noexcept(meta::is_nothrow_forward_constructible_v<Then>)
       {
-        return sequence {std::move(*this), node {std::forward<Then>(next)}};
+        return seq<seq, comp<Then>> {std::move(*this), comp {std::forward<Then>(next)}};
+      }
+
+      static size_t async_count() noexcept {
+        return producer_type::async_count() + consumer_type::async_count();
       }
 
     private:
@@ -108,7 +116,10 @@ namespace dagger {
   };
 
   template <class P, class C>
-  sequence(P, C) -> sequence<P, C>;
+  seq(P, C) -> seq<P, C>;
+
+  template <class P, class C>
+  using sequence = seq<P, C>;
 
 }
 
