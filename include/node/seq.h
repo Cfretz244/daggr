@@ -7,12 +7,12 @@
 
 /*----- Local Includes -----*/
 
-#include "helper.h"
-#include "comp.h"
+#include "../node.h"
+#include "../sched/eager.h"
 
 /*----- Type Declarations -----*/
 
-namespace daggr {
+namespace daggr::node {
 
   template <class F>
   class comp;
@@ -31,8 +31,8 @@ namespace daggr {
       template <class Input>
       struct is_applicable :
         meta::sequence_is_walkable<
-          node::child_is_applicable,
-          node::child_apply_result,
+          detail::child_is_applicable,
+          detail::child_apply_result,
           Input,
           Producer,
           Consumer
@@ -47,6 +47,18 @@ namespace daggr {
       };
       template <class Input>
       using apply_result_t = typename apply_result<Input>::type;
+
+      template <class Input>
+      struct has_result :
+        std::conjunction<
+          is_applicable<Input>,
+          std::negation<
+            std::is_same<apply_result_t<Input>, meta::none>
+          >
+        >
+      {};
+      template <class Input>
+      static constexpr auto has_result_v = has_result<Input>::value;
 
       /*----- Lifecycle Functions -----*/
 
@@ -94,14 +106,72 @@ namespace daggr {
       seq& operator =(seq const&) = default;
       seq& operator =(seq&&) = default;
 
+      template <class Arg,
+        std::enable_if_t<
+          has_result_v<Arg>
+          &&
+          is_applicable_v<Arg>
+        >* = nullptr
+      >
+      auto operator ()(Arg&& arg) {
+        sched::eager sched;
+        std::optional<apply_result_t<Arg>> opt;
+        execute(sched, std::forward<Arg>(arg), [&] (auto&& res) {
+          opt.emplace(std::forward<decltype(res)>(res));
+        });
+        return *std::move(opt);
+      }
+
+      template <class Arg,
+        std::enable_if_t<
+          !has_result_v<Arg>
+          &&
+          is_applicable_v<Arg>
+        >* = nullptr
+      >
+      void operator ()(Arg&& arg) {
+        sched::eager sched;
+        execute(sched, std::forward<Arg>(arg));
+      }
+
+      template <class Arg = meta::none,
+        std::enable_if_t<
+          has_result_v<Arg>
+          &&
+          is_applicable_v<Arg>
+        >* = nullptr
+      >
+      auto operator ()() {
+        sched::eager sched;
+        std::optional<apply_result_t<Arg>> opt;
+        execute(sched, meta::none_v, [&] (auto&& res) {
+          opt.emplace(std::forward<decltype(res)>(res));
+        });
+        return *std::move(opt);
+      }
+
+      template <class Arg = meta::none,
+        std::enable_if_t<
+          !has_result_v<Arg>
+          &&
+          is_applicable_v<Arg>
+        >* = nullptr
+      >
+      void operator ()() {
+        sched::eager sched;
+        execute(sched, meta::none_v);
+      }
+
       /*----- Public API -----*/
 
-      template <class Scheduler, class Input, class Then, class Terminate, class =
+      template <class Scheduler, class Input,
+               class Then = detail::noop_t, class Terminate = detail::noop_t, class =
         std::enable_if_t<
           is_applicable_v<Input>
         >
       >
-      void execute(Scheduler& sched, Input&& in, Then&& next, Terminate&& term) {
+      void execute(Scheduler& sched, Input&& in,
+          Then&& next = detail::noop_v, Terminate&& term = detail::noop_v) {
         prod.execute(sched, std::forward<Input>(in),
             [this, &sched, next = std::forward<Then>(next), term] (auto&& tmp) {
           cons.execute(sched,

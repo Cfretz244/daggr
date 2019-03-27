@@ -7,25 +7,24 @@
 
 /*----- Local Includes -----*/
 
-#include "seq.h"
-#include "../meta/function_traits.h"
-#include "../meta/lifecycle_traits.h"
+#include "../node.h"
+#include "../sched/eager.h"
 
 /*----- Type Declarations -----*/
 
-namespace daggr {
+namespace daggr::node {
 
-  namespace node::detail {
+  namespace detail {
     template <class Input>
     struct bound_child_is_applicable {
       template <class Node>
-      struct perform : node::child_is_applicable<Node, Input> {};
+      struct perform : child_is_applicable<Node, Input> {};
     };
 
     template <class Input>
     struct bound_child_apply_result {
       template <class Node>
-      struct perform : node::child_apply_result<Node, Input> {};
+      struct perform : child_apply_result<Node, Input> {};
     };
 
     template <class Input, class... Nodes>
@@ -51,7 +50,7 @@ namespace daggr {
         std::conjunction<
           std::is_copy_constructible<std::decay_t<Input>>,
           meta::all_of<
-            node::detail::bound_child_is_applicable<Input>::template perform,
+            detail::bound_child_is_applicable<Input>::template perform,
             Nodes...
           >
         >
@@ -62,11 +61,23 @@ namespace daggr {
       template <class Input>
       struct apply_result {
         using type = meta::filter_tuple_none_t<
-          node::detail::intermediate_storage_t<Input, Nodes...>
+          detail::intermediate_storage_t<Input, Nodes...>
         >;
       };
       template <class Input>
       using apply_result_t = typename apply_result<Input>::type;
+
+      template <class Input>
+      struct has_result :
+        std::conjunction<
+          is_applicable<Input>,
+          std::negation<
+            std::is_same<apply_result_t<Input>, meta::none>
+          >
+        >
+      {};
+      template <class Input>
+      static constexpr auto has_result_v = has_result<Input>::value;
 
       /*----- Lifecycle Functions -----*/
 
@@ -102,16 +113,74 @@ namespace daggr {
       all& operator =(all const&) = default;
       all& operator =(all&&) = default;
 
+      template <class Arg,
+        std::enable_if_t<
+          has_result_v<Arg>
+          &&
+          is_applicable_v<Arg>
+        >* = nullptr
+      >
+      auto operator ()(Arg&& arg) {
+        sched::eager sched;
+        std::optional<apply_result_t<Arg>> opt;
+        execute(sched, std::forward<Arg>(arg), [&] (auto&& res) {
+          opt.emplace(std::forward<decltype(res)>(res));
+        });
+        return *std::move(opt);
+      }
+
+      template <class Arg,
+        std::enable_if_t<
+          !has_result_v<Arg>
+          &&
+          is_applicable_v<Arg>
+        >* = nullptr
+      >
+      void operator ()(Arg&& arg) {
+        sched::eager sched;
+        execute(sched, std::forward<Arg>(arg));
+      }
+
+      template <class Arg = meta::none,
+        std::enable_if_t<
+          has_result_v<Arg>
+          &&
+          is_applicable_v<Arg>
+        >* = nullptr
+      >
+      auto operator ()() {
+        sched::eager sched;
+        std::optional<apply_result_t<Arg>> opt;
+        execute(sched, meta::none_v, [&] (auto&& res) {
+          opt.emplace(std::forward<decltype(res)>(res));
+        });
+        return *std::move(opt);
+      }
+
+      template <class Arg = meta::none,
+        std::enable_if_t<
+          !has_result_v<Arg>
+          &&
+          is_applicable_v<Arg>
+        >* = nullptr
+      >
+      void operator ()() {
+        sched::eager sched;
+        execute(sched, meta::none_v);
+      }
+
       /*----- Public API -----*/
 
-      template <class Scheduler, class Input, class Then, class Terminate, class =
+      template <class Scheduler, class Input,
+               class Then = detail::noop_t, class Terminate = detail::noop_t, class =
         std::enable_if_t<
           is_applicable_v<Input>
         >
       >
-      void execute(Scheduler& sched, Input&& in, Then&& next, Terminate&& term) {
+      void execute(Scheduler& sched, Input&& in,
+          Then&& next = detail::noop_v, Terminate&& term = detail::noop_v) {
         // Get a tuple to hold the calculated results.
-        auto state = std::make_shared<node::detail::intermediate_storage_t<Input, Nodes...>>();
+        auto state = std::make_shared<detail::intermediate_storage_t<Input, Nodes...>>();
         
         // Statically iterate over each contained node.
         meta::for_each_t<Nodes...>([&] (auto idx, auto) {

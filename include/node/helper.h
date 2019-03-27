@@ -12,7 +12,7 @@
 
 /*----- Type Declarations -----*/
 
-namespace daggr::node {
+namespace daggr::node::detail {
 
   // Helper meta-functions to write our applicability in terms of our children.
   template <class Node, class Input>
@@ -22,10 +22,15 @@ namespace daggr::node {
   template <class Node, class Input>
   constexpr auto child_is_applicable_v = child_is_applicable<Node, Input>::value;
 
+  // Helper meta-functions to write our results in terms of our children.
   template <class Node, class Input>
   struct child_apply_result : Node::template apply_result<Input> {};
   template <class Node, class Input>
   using child_apply_result_t = typename child_apply_result<Node, Input>::type;
+
+  // Global empty lambda to use for defaulted parameters.
+  constexpr auto noop_v = [] {};
+  using noop_t = decltype(noop_v) const&;
 
 }
 
