@@ -48,9 +48,9 @@ namespace daggr::node {
       template <class Input>
       struct is_applicable :
         std::conjunction<
-          std::is_copy_constructible<std::decay_t<Input>>,
+          meta::is_forward_constructible<Input>,
           meta::all_of<
-            detail::bound_child_is_applicable<Input>::template perform,
+            detail::bound_child_is_applicable<std::decay_t<Input> const&>::template perform,
             Nodes...
           >
         >
@@ -61,7 +61,7 @@ namespace daggr::node {
       template <class Input>
       struct apply_result {
         using type = meta::filter_tuple_none_t<
-          detail::intermediate_storage_t<Input, Nodes...>
+          detail::intermediate_storage_t<std::decay_t<Input> const&, Nodes...>
         >;
       };
       template <class Input>
@@ -237,7 +237,7 @@ namespace daggr::node {
           in(std::forward<In>(in)),
           remaining(sizeof...(Nodes))
         {}
-        Input const in;
+        std::decay_t<Input> const in;
         std::atomic<int64_t> remaining;
         detail::intermediate_storage_t<Input, Nodes...> store;
       };
