@@ -86,9 +86,7 @@ namespace daggr::node {
           std::is_default_constructible_v<Storage>
         >
       >
-      all() noexcept(std::is_nothrow_default_constructible_v<Storage>) :
-        remaining(sizeof...(Nodes))
-      {}
+      all() : nodes(std::make_shared<Storage>()) {}
       template <class... Ns, class =
         std::enable_if_t<
           sizeof...(Ns) == sizeof...(Nodes)
@@ -100,17 +98,21 @@ namespace daggr::node {
         >
       >
       all(Ns&&... nodes) :
-        nodes(std::forward<Ns>(nodes)...),
-        remaining(sizeof...(Nodes))
+        nodes(std::make_shared<std::tuple<Nodes...>>(std::forward<Ns>(nodes)...))
       {}
 
-      all(all const&) = default;
+      all(all const& other) : nodes(std::make_shared<std::tuple<Nodes...>>(*other.nodes)) {}
       all(all&&) = default;
       ~all() = default;
 
       /*----- Operators -----*/
 
-      all& operator =(all const&) = default;
+      all& operator =(all const& other) {
+        if (this == &other) return *this;
+        auto tmp {other};
+        *this = std::move(tmp);
+        return *this;
+      }
       all& operator =(all&&) = default;
 
       template <class Arg,
@@ -180,21 +182,23 @@ namespace daggr::node {
       void execute(Scheduler& sched, Input&& in,
           Then&& next = detail::noop_v, Terminate&& term = detail::noop_v) {
         // Get a tuple to hold the calculated results.
-        auto state = std::make_shared<detail::intermediate_storage_t<Input, Nodes...>>();
+        auto state = std::make_shared<execution_storage<Input>>(std::forward<Input>(in));
         
         // Statically iterate over each contained node.
+        auto copy = nodes;
         meta::for_each_t<Nodes...>([&] (auto idx, auto) {
-          // Grab the current node.
-          auto& curr = std::get<decltype(idx) {}>(nodes);
-
           // Create an intermediate computation to run this node, and schedule it.
-          auto intermediate = [this, &sched, state, in, &curr, next, term] {
-            curr.execute(sched, in, [this, state = std::move(state), next] (auto&& out) {
+          auto intermediate = [nodes = copy, &sched, state, next, term] {
+            auto& in = state->in;
+            auto& curr = std::get<decltype(idx) {}>(*nodes);
+            curr.execute(sched, in, [state = std::move(state), next] (auto&& out) {
               // Write the value in for this node of the computation.
-              std::get<decltype(idx) {}>(*state) = std::forward<decltype(out)>(out);
+              std::get<decltype(idx) {}>(state->store) = std::forward<decltype(out)>(out);
 
               // Call into our continuation if we were the final node of the all.
-              if (remaining.fetch_sub(1) == 1) meta::apply(next, std::move(*state));
+              if (state->remaining.fetch_sub(1) == 1) {
+                meta::apply(next, std::move(state->store));
+              }
             }, term);
           };
 
@@ -205,10 +209,41 @@ namespace daggr::node {
         });
       }
 
+      template <class Then>
+      seq<all, comp<Then>> then(Then&& next) const& {
+        return seq<all, comp<Then>> {*this, comp<Then> {std::forward<Then>(next)}};
+      }
+
+      template <class Then>
+      seq<all, comp<Then>> then(Then&& next) &&
+        noexcept(meta::is_nothrow_forward_constructible_v<Then>)
+      {
+        return seq<all, comp<Then>> {*this, comp<Then> {std::forward<Then>(next)}};
+      }
+
+      static size_t async_count() noexcept {
+        return (Nodes::async_count() + ...);
+      }
+
     private:
 
-      std::tuple<Nodes...> nodes;
-      std::atomic<int64_t> remaining;
+      /*----- Private Types -----*/
+
+      template <class Input>
+      struct execution_storage {
+        template <class In>
+        execution_storage(In&& in) :
+          in(std::forward<In>(in)),
+          remaining(sizeof...(Nodes))
+        {}
+        Input const in;
+        std::atomic<int64_t> remaining;
+        detail::intermediate_storage_t<Input, Nodes...> store;
+      };
+
+      /*----- Private Members -----*/
+
+      std::shared_ptr<std::tuple<Nodes...>> nodes;
 
   };
 

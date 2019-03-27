@@ -67,7 +67,7 @@ namespace daggr::node {
           meta::are_default_constructible_v<P, C>
         >
       >
-      seq() noexcept(meta::are_nothrow_default_constructible_v<P, C>) {}
+      seq() : state(std::make_shared<storage>()) {}
       template <class P, class =
         std::enable_if_t<
           std::is_same_v<
@@ -77,7 +77,7 @@ namespace daggr::node {
         >
       >
       explicit seq(P&& prod) noexcept(nothrow_partially_constructible_v<P, Consumer>) :
-        prod(std::forward<P>(prod))
+        state(std::make_shared<storage>(std::forward<P>(prod)))
       {}
       template <class P, class C, class =
         std::enable_if_t<
@@ -93,8 +93,7 @@ namespace daggr::node {
         >
       >
       explicit seq(P&& prod, C&& cons) noexcept(meta::are_nothrow_forward_constructible_v<P, C>) :
-        prod(std::forward<P>(prod)),
-        cons(std::forward<C>(cons))
+        state(std::make_shared<storage>(std::forward<P>(prod), std::forward<C>(cons)))
       {}
 
       seq(seq const&) = default;
@@ -172,17 +171,16 @@ namespace daggr::node {
       >
       void execute(Scheduler& sched, Input&& in,
           Then&& next = detail::noop_v, Terminate&& term = detail::noop_v) {
-        prod.execute(sched, std::forward<Input>(in),
-            [this, &sched, next = std::forward<Then>(next), term] (auto&& tmp) {
-          cons.execute(sched,
+        auto copy = state;
+        state->prod.execute(sched, std::forward<Input>(in),
+            [&sched, state = std::move(copy), next = std::forward<Then>(next), term] (auto&& tmp) {
+          state->cons.execute(sched,
               std::forward<decltype(tmp)>(tmp), std::move(next), std::move(term));
         }, std::forward<Terminate>(term));
       }
 
       template <class Then>
-      seq<seq, comp<Then>> then(Then&& next) const&
-        noexcept(meta::is_nothrow_forward_constructible_v<Then>)
-      {
+      seq<seq, comp<Then>> then(Then&& next) const& {
         return seq<seq, comp<Then>> {*this, comp {std::forward<Then>(next)}};
       }
 
@@ -199,10 +197,30 @@ namespace daggr::node {
 
     private:
 
+      /*----- Private Types -----*/
+
+      // Make alignment smarter than this.
+      struct storage {
+        storage() = default;
+        template <class P>
+        storage(P&& prod) :
+          prod(std::forward<P>(prod))
+        {}
+        template <class P, class C>
+        storage(P&& prod, C&& cons) :
+          prod(std::forward<P>(prod)),
+          cons(std::forward<C>(cons))
+        {}
+        storage(storage const&) = delete;
+        storage(storage&&) = delete;
+
+        alignas(64) Producer prod;
+        alignas(64) Consumer cons;
+      };
+
       /*----- Private Members -----*/
 
-      Producer prod;
-      Consumer cons;
+      std::shared_ptr<storage> state;
 
   };
 

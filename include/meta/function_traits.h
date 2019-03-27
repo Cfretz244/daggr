@@ -422,8 +422,7 @@ namespace daggr::meta {
       constexpr auto tuple_size = std::tuple_size<std::decay_t<Arg>>::value;
       return detail::apply_impl([&] (auto&&... args) -> decltype(auto) {
         // If our functor can be invoked with our destructured arguments directly...
-        constexpr auto invoke_with_arguments = meta::is_invocable_v<Functor, decltype(args)...>;
-        if constexpr (invoke_with_arguments) {
+        if constexpr (meta::is_invocable_v<Functor, decltype(args)...>) {
           // Do so.
           return meta::invoke(std::forward<Functor>(func), std::forward<decltype(args)>(args)...);
         } else {
