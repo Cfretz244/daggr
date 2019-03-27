@@ -428,7 +428,7 @@ namespace daggr::meta {
           return meta::invoke(std::forward<Functor>(func), std::forward<decltype(args)>(args)...);
         } else {
           // Otherwise, fall back and forward our arguments into an edited tuple.
-          return meta::invoke(std::forward<Functor>(func), std::tuple {std::forward<decltype(args)>...});
+          return meta::invoke(std::forward<Functor>(func), std::tuple {std::forward<decltype(args)>(args)...});
         }
       }, std::forward<Arg>(argument), std::make_index_sequence<tuple_size> {});;
     } else {

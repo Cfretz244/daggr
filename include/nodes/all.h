@@ -114,7 +114,7 @@ namespace daggr {
         auto state = std::make_shared<node::detail::intermediate_storage_t<Input, Nodes...>>();
         
         // Statically iterate over each contained node.
-        meta::for_each_t<Nodes...>([&] (auto idx, auto type) {
+        meta::for_each_t<Nodes...>([&] (auto idx, auto) {
           // Grab the current node.
           auto& curr = std::get<decltype(idx) {}>(nodes);
 
@@ -125,7 +125,7 @@ namespace daggr {
               std::get<decltype(idx) {}>(*state) = std::forward<decltype(out)>(out);
 
               // Call into our continuation if we were the final node of the all.
-              if (remaining.fetch_sub(1) == 1) next(std::move(*state));
+              if (remaining.fetch_sub(1) == 1) meta::apply(next, std::move(*state));
             }, term);
           };
 

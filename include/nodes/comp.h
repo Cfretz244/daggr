@@ -99,9 +99,23 @@ namespace daggr {
   };
 
   template <>
-  class comp<void> {
+  class comp<meta::none> {
 
     public:
+
+      /*----- Public Types -----*/
+
+      template <class Input>
+      struct is_applicable : std::is_same<std::decay_t<Input>, meta::none> {};
+      template <class Input>
+      static constexpr auto is_applicable_v = is_applicable<Input>::value;
+
+      template <class>
+      struct apply_result {
+        using type = meta::none;
+      };
+      template <class T>
+      using apply_result_t = typename apply_result<T>::type;
 
       /*----- Lifecycle Functions -----*/
 
@@ -120,7 +134,7 @@ namespace daggr {
 
       template <class Scheduler, class Then, class Terminate>
       void execute(Scheduler&, meta::none, Then&& next, Terminate&&) {
-        std::invoke(std::forward<Then>(next));
+        std::invoke(std::forward<Then>(next), meta::none_v);
       }
 
       template <class Then>
