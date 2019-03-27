@@ -64,9 +64,70 @@ namespace daggr::meta {
   template <class T>
   constexpr auto is_tuple_v = is_tuple<T>::value;
 
+  // Returns the first type in a parameter pack.
+  template <class... Ts>
+  struct first_type {
+    using type = nonesuch;
+  };
+  template <class T, class... Ts>
+  struct first_type<T, Ts...> {
+    using type = T;
+  };
+  template <class... Ts>
+  using first_type_t = typename first_type<Ts...>::type;
+
+  template <template <class...> class Predicate, class... Ts>
+  struct all_of : std::conjunction<Predicate<Ts>...> {};
+  template <template <class...> class Predicate, class... Ts>
+  constexpr auto all_of_v = all_of<Predicate, Ts...>::value;
+
+  template <template <class...> class Predicate, class... Ts>
+  struct any_of : std::disjunction<Predicate<Ts>...> {};
+  template <template <class...> class Predicate, class... Ts>
+  constexpr auto any_of_v = any_of<Predicate, Ts...>::value;
+
+  template <template <class...> class Predicate, class... Ts>
+  struct none_of : std::conjunction<std::negation<Predicate<Ts>>...> {};
+  template <template <class...> class Predicate, class... Ts>
+  constexpr auto none_of_v = none_of<Predicate, Ts...>::value;
+
+  // Implementation of type list tranformations.
+  namespace detail {
+    template <template <class...> class Transform, class TypeList, size_t idx, class... Transformed>
+    struct transform_type_sequence_impl {
+      static constexpr size_t current_idx = idx - 1;
+      using current_transform_t = typename Transform<
+        std::tuple_element_t<current_idx, TypeList>
+      >::type;
+
+      using type =
+        typename transform_type_sequence_impl<
+          Transform,
+          TypeList,
+          current_idx,
+          current_transform_t,
+          Transformed...
+        >::type;
+    };
+    template <template <class...> class Transform, class TypeList, class... Transformed>
+    struct transform_type_sequence_impl<Transform, TypeList, 0, Transformed...> {
+      static constexpr size_t current_idx = 0;
+      using type = std::tuple<Transformed...>;
+    };
+  }
+
+  // Type list tranformation according to some transform meta-function.
+  template <template <class...> class Transform, class... Ts>
+  struct transform_type_sequence {
+    using type =
+      typename detail::transform_type_sequence_impl<Transform, std::tuple<Ts...>, sizeof...(Ts)>::type;
+  };
+  template <template <class...> class Transform, class... Ts>
+  using transform_type_sequence_t = typename transform_type_sequence<Transform, Ts...>::type;
+
   // Implementation of type list filtering.
   namespace detail {
-    template <template <class> class Predicate, class TypeList, size_t idx, size_t... idxs>
+    template <template <class...> class Predicate, class TypeList, size_t idx, size_t... idxs>
     struct filter_type_sequence_impl {
       static constexpr size_t current_idx = idx - 1;
       using next_filter_t = std::conditional_t<
@@ -80,7 +141,7 @@ namespace daggr::meta {
       using type = typename next_filter_t::type;
       using index_type = typename next_filter_t::index_type;
     };
-    template <template <class> class Predicate, class TypeList, size_t... idxs>
+    template <template <class...> class Predicate, class TypeList, size_t... idxs>
     struct filter_type_sequence_impl<Predicate, TypeList, 0, idxs...> {
       static constexpr size_t current_idx = 0;
 
@@ -92,43 +153,60 @@ namespace daggr::meta {
   }
 
   // Type list filtering according to some predicate.
-  template <template <class> class Predicate, class... Ts>
+  template <template <class...> class Predicate, class... Ts>
   struct filter_type_sequence {
     using impl_type_t = detail::filter_type_sequence_impl<Predicate, std::tuple<Ts...>, sizeof...(Ts)>;
 
     using type = typename impl_type_t::type;
     using index_type = typename impl_type_t::index_type;
   };
-  template <template <class> class Predicate, class... Ts>
+  template <template <class...> class Predicate, class... Ts>
   using filter_type_sequence_t = typename filter_type_sequence<Predicate, Ts...>::type;
-  template <template <class> class Predicate, class... Ts>
+  template <template <class...> class Predicate, class... Ts>
   using filter_type_sequence_idxs_t = typename filter_type_sequence<Predicate, Ts...>::index_type;
+
+  template <template <class...> class Predicate, class T>
+  struct filter_tuple {
+    using type = T;
+    using index_type = std::index_sequence<>;
+  };
+  template <template <class...> class Predicate, class... Ts>
+  struct filter_tuple<Predicate, std::tuple<Ts...>> {
+    using type = filter_type_sequence_t<Predicate, Ts...>;
+    using index_type = filter_type_sequence_idxs_t<Predicate, Ts...>;
+  };
+
+  // Filter meta-function that filters out any instance of meta::none or void.
+  template <class Type>
+  struct none_filter :
+    std::negation<
+      std::disjunction<
+        std::is_same<
+          std::decay_t<Type>,
+          none
+        >,
+        std::is_same<
+          std::decay_t<Type>,
+          void
+        >
+      >
+    >
+  {};
 
   // Removes none from a type list to allow for regular void operations.
   template <class... Ts>
-  struct filter_none {
-    template <class Type>
-    struct none_filter :
-      std::negation<
-        std::disjunction<
-          std::is_same<
-            std::decay_t<Type>,
-            none
-          >,
-          std::is_same<
-            std::decay_t<Type>,
-            void
-          >
-        >
-      >
-    {};
-    using type = typename filter_type_sequence<none_filter, Ts...>::type;
-    using index_type = typename filter_type_sequence<none_filter, Ts...>::index_type;
-  };
+  struct filter_none : filter_type_sequence<none_filter, Ts...> {};
   template <class... Ts>
   using filter_none_t = typename filter_none<Ts...>::type;
   template <class... Ts>
   using filter_none_idxs_t = typename filter_none<Ts...>::index_type;
+
+  template <class T>
+  struct filter_tuple_none : filter_tuple<none_filter, T> {};
+  template <class T>
+  using filter_tuple_none_t = typename filter_tuple_none<T>::type;
+  template <class T>
+  using filter_tuple_none_idxs_t = typename filter_tuple_none<T>::index_type;
 
   // is_invocable implementation.
   namespace detail {
@@ -214,13 +292,13 @@ namespace daggr::meta {
   namespace detail {
     template <template <class...> class Predicate, class Func, class... Args>
     using is_unwrappable_t = std::disjunction<
-      Predicate<Func, filter_none_t<Args...>>,
-      Predicate<Func, Args...>
+      Predicate<Func, Args...>,
+      Predicate<Func, filter_none_t<Args...>>
     >;
     template <template <class...> class Predicate, class Ret, class Func, class... Args>
     using is_unwrappable_r_t = std::disjunction<
-      Predicate<Ret, Func, filter_none_t<Args...>>,
-      Predicate<Ret, Func, Args...>
+      Predicate<Ret, Func, Args...>,
+      Predicate<Ret, Func, filter_none_t<Args...>>
     >;
   }
 
@@ -331,39 +409,32 @@ namespace daggr::meta {
     }
   }
 
-  // FIXME:
-  // Will currently attempt to instantiate user templates with std::tuples of meta::none
   template <class Functor, class Arg, class =
     std::enable_if_t<
       meta::is_applicable_v<Functor, Arg>
     >
   >
   decltype(auto) apply(Functor&& func, Arg&& argument) {
-    // If our functor is directly invocable with the passed argument, tuple or not...
-    if constexpr (meta::is_invocable_v<Functor, Arg>) {
-      // Invoke it directly.
-      return meta::invoke(std::forward<Functor>(func), std::forward<Arg>(argument));
-    } else {
-      // Otherwise it must be a tuple we may or may not need to unpack.
-      static_assert(meta::is_tuple_v<std::decay_t<Arg>>);
-      static constexpr auto len = std::tuple_size<std::decay_t<Arg>>::value;
-
-      // Our invocation of apply_impl here will indirect through meta::invoke,
-      // filtering out any instances of meta::none.
+    // If our argument is a tuple...
+    if constexpr (meta::is_tuple_v<std::decay_t<Arg>>) {
+      // We forward and destructure that tuple such that
+      // any instances of meta::none will be removed.
+      constexpr auto tuple_size = std::tuple_size<std::decay_t<Arg>>::value;
       return detail::apply_impl([&] (auto&&... args) -> decltype(auto) {
-        constexpr auto invoke_with_filtered_tuple =
-            meta::is_invocable_v<Functor, std::tuple<std::decay_t<decltype(args)>...>>;
-
-        // If our functor is directly invocable with the tuple post-filtering,
-        if constexpr (invoke_with_filtered_tuple) {
+        // If our functor can be invoked with our destructured arguments directly...
+        constexpr auto invoke_with_arguments = meta::is_invocable_v<Functor, decltype(args)...>;
+        if constexpr (invoke_with_arguments) {
           // Do so.
-          return meta::invoke(std::forward<Functor>(func),
-              std::tuple {std::forward<decltype(args)>(args)...});
-        } else {
-          // Otherwise invoke it with the arguments themselves.
           return meta::invoke(std::forward<Functor>(func), std::forward<decltype(args)>(args)...);
+        } else {
+          // Otherwise, fall back and forward our arguments into an edited tuple.
+          return meta::invoke(std::forward<Functor>(func), std::tuple {std::forward<decltype(args)>...});
         }
-      }, std::forward<Arg>(argument), std::make_index_sequence<len> {});
+      }, std::forward<Arg>(argument), std::make_index_sequence<tuple_size> {});;
+    } else {
+      // Otherwise just invoke our functor with whatever we were given.
+      static_assert(meta::is_invocable_v<Functor, Arg>);
+      return meta::invoke(std::forward<Functor>(func), std::forward<Arg>(argument));
     }
   }
 

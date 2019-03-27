@@ -19,35 +19,25 @@ namespace daggr {
   template <class Producer, class Consumer>
   class seq;
 
-  template <class F>
+  template <class Func>
   class comp {
 
     public:
 
       /*----- Public Types -----*/
 
-      using functor_type = F;
-
       template <class Input>
-      struct is_invocable : meta::is_invocable<F, Input> {};
-      template <class Input>
-      static constexpr auto is_invocable_v = is_invocable<Input>::value;
-      template <class Input>
-      struct invoke_result : meta::invoke_result<F, Input> {};
-      template <class Input>
-      using invoke_result_t = typename invoke_result<Input>::type;
-      template <class Input>
-      struct is_applicable : meta::is_applicable<F, Input> {};
+      struct is_applicable : meta::is_applicable<Func, Input> {};
       template <class Input>
       static constexpr auto is_applicable_v = is_applicable<Input>::value;
       template <class Input>
-      struct apply_result : meta::apply_result<F, Input> {};
+      struct apply_result : meta::apply_result<Func, Input> {};
       template <class Input>
       using apply_result_t = typename apply_result<Input>::type;
 
       /*----- Lifecycle Functions -----*/
 
-      template <class U = F, class =
+      template <class U = Func, class =
         std::enable_if_t<
           std::is_default_constructible_v<U>
         >
@@ -57,7 +47,7 @@ namespace daggr {
         std::enable_if_t<
           std::is_same_v<
             std::decay_t<U>,
-            F
+            Func
           >
         >
       >
@@ -75,11 +65,11 @@ namespace daggr {
 
       template <class Scheduler, class Input, class Then, class Terminate, class =
         std::enable_if_t<
-          meta::sequence_is_invocable_v<Input, functor_type, Then>
+          is_applicable_v<Input>
         >
       >
       void execute(Scheduler&, Input&& in, Then&& next, Terminate&&) {
-        meta::invoke(std::forward<Then>(next), meta::invoke(func, std::forward<Input>(in)));
+        meta::apply(std::forward<Then>(next), meta::apply(func, std::forward<Input>(in)));
       }
 
       template <class Then>
@@ -104,7 +94,7 @@ namespace daggr {
 
       /*----- Private Members -----*/
 
-      functor_type func;
+      Func func;
 
   };
 
@@ -112,10 +102,6 @@ namespace daggr {
   class comp<void> {
 
     public:
-
-      /*----- Public Types -----*/
-
-      using functor_type = void;
 
       /*----- Lifecycle Functions -----*/
 
