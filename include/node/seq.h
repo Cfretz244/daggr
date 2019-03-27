@@ -180,15 +180,23 @@ namespace daggr::node {
       }
 
       template <class Then>
-      seq<seq, comp<Then>> then(Then&& next) const& {
-        return seq<seq, comp<Then>> {*this, comp {std::forward<Then>(next)}};
+      auto then(Then&& next) const& {
+        if constexpr (daggr::is_node_v<std::decay_t<Then>>) {
+          return node::seq {*this, std::decay_t<Then> {std::forward<Then>(next)}};
+        } else {
+          return node::seq {*this, comp {std::forward<Then>(next)}};
+        }
       }
 
       template <class Then>
-      seq<seq, comp<Then>> then(Then&& next) &&
+      auto then(Then&& next) &&
         noexcept(meta::is_nothrow_forward_constructible_v<Then>)
       {
-        return seq<seq, comp<Then>> {std::move(*this), comp {std::forward<Then>(next)}};
+        if constexpr (daggr::is_node_v<std::decay_t<Then>>) {
+          return node::seq {std::move(*this), std::decay_t<Then> {std::forward<Then>(next)}};
+        } else {
+          return node::seq {std::move(*this), comp {std::forward<Then>(next)}};
+        }
       }
 
       static size_t async_count() noexcept {
