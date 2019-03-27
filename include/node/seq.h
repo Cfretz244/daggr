@@ -76,7 +76,7 @@ namespace daggr::node {
           >
         >
       >
-      explicit seq(P&& prod) noexcept(nothrow_partially_constructible_v<P, Consumer>) :
+      explicit seq(P&& prod) :
         state(std::make_shared<storage>(std::forward<P>(prod)))
       {}
       template <class P, class C, class =
@@ -92,7 +92,7 @@ namespace daggr::node {
           >
         >
       >
-      explicit seq(P&& prod, C&& cons) noexcept(meta::are_nothrow_forward_constructible_v<P, C>) :
+      explicit seq(P&& prod, C&& cons) :
         state(std::make_shared<storage>(std::forward<P>(prod), std::forward<C>(cons)))
       {}
 
@@ -163,44 +163,38 @@ namespace daggr::node {
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Input,
-               class Then = detail::noop_t, class Terminate = detail::noop_t, class =
+      template <class Scheduler, class Input, class Then = detail::noop_t, class =
         std::enable_if_t<
           is_applicable_v<Input>
         >
       >
-      void execute(Scheduler& sched, Input&& in,
-          Then&& next = detail::noop_v, Terminate&& term = detail::noop_v) {
+      void execute(Scheduler& sched, Input&& in, Then&& next = detail::noop_v) {
         auto copy = state;
         state->prod.execute(sched, std::forward<Input>(in),
-            [&sched, state = std::move(copy), next = std::forward<Then>(next), term] (auto&& tmp) {
+            [&sched, state = std::move(copy), next = std::forward<Then>(next)] (auto&& tmp) {
           state->cons.execute(sched,
-              std::forward<decltype(tmp)>(tmp), std::move(next), std::move(term));
-        }, std::forward<Terminate>(term));
+              std::forward<decltype(tmp)>(tmp), std::move(next));
+        });
       }
 
       template <class Then>
       auto then(Then&& next) const& {
-        if constexpr (daggr::is_node_v<std::decay_t<Then>>) {
-          return node::seq {*this, std::decay_t<Then> {std::forward<Then>(next)}};
-        } else {
-          return node::seq {*this, comp {std::forward<Then>(next)}};
-        }
+        return node::seq {*this, detail::normalize(std::forward<Then>(next))};
       }
 
       template <class Then>
-      auto then(Then&& next) &&
-        noexcept(meta::is_nothrow_forward_constructible_v<Then>)
-      {
-        if constexpr (daggr::is_node_v<std::decay_t<Then>>) {
-          return node::seq {std::move(*this), std::decay_t<Then> {std::forward<Then>(next)}};
-        } else {
-          return node::seq {std::move(*this), comp {std::forward<Then>(next)}};
-        }
+      auto then(Then&& next) && {
+        return node::seq {std::move(*this), detail::normalize(std::forward<Then>(next))};
       }
 
-      static size_t async_count() noexcept {
-        return Producer::async_count() + Consumer::async_count();
+      template <class... Nodes>
+      auto join(Nodes&&... nodes) const& {
+        return node::all {*this, detail::normalize(std::forward<Nodes>(nodes))...};
+      }
+
+      template <class... Nodes>
+      auto join(Nodes&&... nodes) && {
+        return node::all {std::move(*this), detail::normalize(std::forward<Nodes>(nodes))...};
       }
 
     private:

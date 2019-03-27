@@ -173,14 +173,12 @@ namespace daggr::node {
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Input,
-               class Then = detail::noop_t, class Terminate = detail::noop_t, class =
+      template <class Scheduler, class Input, class Then = detail::noop_t, class =
         std::enable_if_t<
           is_applicable_v<Input>
         >
       >
-      void execute(Scheduler& sched, Input&& in,
-          Then&& next = detail::noop_v, Terminate&& term = detail::noop_v) {
+      void execute(Scheduler& sched, Input&& in, Then&& next = detail::noop_v) {
         // Get a tuple to hold the calculated results.
         auto state = std::make_shared<execution_storage<Input>>(std::forward<Input>(in));
         
@@ -188,10 +186,9 @@ namespace daggr::node {
         auto copy = nodes;
         meta::for_each_t<Nodes...>([&] (auto idx, auto) {
           // Create an intermediate computation to run this node, and schedule it.
-          auto intermediate = [nodes = copy, &sched, state, next, term] {
-            auto& in = state->in;
+          auto intermediate = [nodes = copy, &sched, state, next] {
             auto& curr = std::get<decltype(idx) {}>(*nodes);
-            curr.execute(sched, in, [state = std::move(state), next] (auto&& out) {
+            curr.execute(sched, state->in, [state = std::move(state), next] (auto&& out) {
               // Write the value in for this node of the computation.
               std::get<decltype(idx) {}>(state->store) = std::forward<decltype(out)>(out);
 
@@ -199,7 +196,7 @@ namespace daggr::node {
               if (state->remaining.fetch_sub(1) == 1) {
                 meta::apply(next, std::move(state->store));
               }
-            }, term);
+            });
           };
 
           // If we're working with the final node, yield the current thread and execute
@@ -211,26 +208,22 @@ namespace daggr::node {
 
       template <class Then>
       auto then(Then&& next) const& {
-        if constexpr (daggr::is_node_v<std::decay_t<Then>>) {
-          return seq {*this, std::decay_t<Then> {std::forward<Then>(next)}};
-        } else {
-          return seq {*this, comp<Then> {std::forward<Then>(next)}};
-        }
+        return node::seq {*this, detail::normalize(std::forward<Then>(next))};
       }
 
       template <class Then>
-      auto then(Then&& next) &&
-        noexcept(meta::is_nothrow_forward_constructible_v<Then>)
-      {
-        if constexpr (daggr::is_node_v<std::decay_t<Then>>) {
-          return seq {std::move(*this), std::decay_t<Then> {std::forward<Then>(next)}};
-        } else {
-          return seq {std::move(*this), comp<Then> {std::forward<Then>(next)}};
-        }
+      auto then(Then&& next) && {
+        return node::seq {std::move(*this), detail::normalize(std::forward<Then>(next))};
       }
 
-      static size_t async_count() noexcept {
-        return (Nodes::async_count() + ...);
+      template <class... Ns>
+      auto join(Ns&&... nodes) const& {
+        return node::all {*this, detail::normalize(std::forward<Ns>(nodes))...};
+      }
+
+      template <class... Ns>
+      auto join(Ns&&... nodes) && {
+        return node::all {std::move(*this), detail::normalize(std::forward<Ns>(nodes))...};
       }
 
     private:

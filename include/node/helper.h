@@ -7,8 +7,7 @@
 
 /*----- Local Includes -----*/
 
-#include "../meta/function_traits.h"
-#include "../meta/lifecycle_traits.h"
+#include "../node.h"
 
 /*----- Type Declarations -----*/
 
@@ -31,6 +30,15 @@ namespace daggr::node::detail {
   // Global empty lambda to use for defaulted parameters.
   constexpr auto noop_v = [] {};
   using noop_t = decltype(noop_v) const&;
+
+  template <class MaybeNode>
+  decltype(auto) normalize(MaybeNode&& mnode) {
+    if constexpr (daggr::is_node_v<std::decay_t<MaybeNode>>) {
+      return std::forward<MaybeNode>(mnode);
+    } else {
+      return comp {std::forward<MaybeNode>(mnode)};
+    }
+  }
 
 }
 

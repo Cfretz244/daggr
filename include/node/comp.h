@@ -131,41 +131,33 @@ namespace daggr::node {
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Input,
-               class Then = detail::noop_t, class Terminate = detail::noop_t, class =
+      template <class Scheduler, class Input, class Then = detail::noop_t, class =
         std::enable_if_t<
           is_applicable_v<Input>
         >
       >
-      void execute(Scheduler&, Input&& in,
-          Then&& next = detail::noop_v, Terminate&& = detail::noop_v) {
+      void execute(Scheduler&, Input&& in, Then&& next = detail::noop_v) {
         meta::apply(std::forward<Then>(next), meta::apply(func, std::forward<Input>(in)));
       }
 
       template <class Then>
-      auto then(Then&& next) const&
-        noexcept(meta::is_nothrow_forward_constructible_v<Then>)
-      {
-        if constexpr (daggr::is_node_v<std::decay_t<Then>>) {
-          return seq {*this, std::decay_t<Then> {std::forward<Then>(next)}};
-        } else {
-          return seq {*this, comp<Then> {std::forward<Then>(next)}};
-        }
+      auto then(Then&& next) const& {
+        return node::seq {*this, detail::normalize(std::forward<Then>(next))};
       }
 
       template <class Then>
-      auto then(Then&& next) &&
-        noexcept(meta::is_nothrow_forward_constructible_v<Then>)
-      {
-        if constexpr (daggr::is_node_v<std::decay_t<Then>>) {
-          return node::seq {std::move(*this), std::decay_t<Then> {std::forward<Then>(next)}};
-        } else {
-          return node::seq {std::move(*this), comp<Then> {std::forward<Then>(next)}};
-        }
+      auto then(Then&& next) && {
+        return node::seq {std::move(*this), detail::normalize(std::forward<Then>(next))};
       }
 
-      static size_t async_count() noexcept {
-        return 0;
+      template <class... Nodes>
+      auto join(Nodes&&... nodes) const& {
+        return node::all {*this, detail::normalize(std::forward<Nodes>(nodes))...};
+      }
+
+      template <class... Nodes>
+      auto join(Nodes&&... nodes) && {
+        return node::all {std::move(*this), detail::normalize(std::forward<Nodes>(nodes))...};
       }
 
     private:
@@ -212,20 +204,19 @@ namespace daggr::node {
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Then, class Terminate>
-      void execute(Scheduler&, meta::none, Then&& next, Terminate&&) {
+      template <class Scheduler, class Then>
+      void execute(Scheduler&, meta::none, Then&& next) {
         std::invoke(std::forward<Then>(next), meta::none_v);
       }
 
       template <class Then>
-      auto then(Then&& next) const
-        noexcept(meta::is_nothrow_forward_constructible_v<Then>)
-      {
-        if constexpr (daggr::is_node_v<std::decay_t<Then>>) {
-          return seq {*this, std::decay_t<Then> {std::forward<Then>(next)}};
-        } else {
-          return seq {*this, comp<Then> {std::forward<Then>(next)}};
-        }
+      auto then(Then&& next) const {
+        return node::seq {*this, detail::normalize(std::forward<Then>(next))};
+      }
+
+      template <class... Nodes>
+      auto join(Nodes&&... nodes) const {
+        return node::all {*this, detail::normalize(std::forward<Nodes>(nodes))...};
       }
 
       static size_t async_count() noexcept {

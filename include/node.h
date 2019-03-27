@@ -35,6 +35,8 @@ namespace daggr {
 
 /*----- Local Includes -----*/
 
+#include "meta/lifecycle_traits.h"
+#include "meta/function_traits.h"
 #include "node/helper.h"
 #include "node/comp.h"
 #include "node/seq.h"
