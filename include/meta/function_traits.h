@@ -589,6 +589,23 @@ namespace daggr::meta {
   template <class Argument, class... Functors>
   using sequence_is_applicable_result_t = typename sequence_is_applicable_result<Argument, Functors...>::type;
 
+  namespace detail {
+    template <class T>
+    struct type_tag {
+      using type = T;
+    };
+
+    template <class... Ts, size_t... idxs, class Callback>
+    void for_each_t_impl(Callback&& cb, std::index_sequence<idxs...>) {
+      (cb(std::integral_constant<size_t, idxs> {}, type_tag<Ts> {}), ...);
+    }
+  }
+
+  template <class... Ts, class Callback>
+  void for_each_t(Callback&& cb) {
+    detail::for_each_t_impl<Ts...>(cb, std::index_sequence_for<Ts...> {});
+  }
+
 }
 
 #endif
