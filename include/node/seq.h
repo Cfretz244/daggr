@@ -97,7 +97,7 @@ namespace daggr::node {
         )
       {}
 
-      seq(seq const&) = default;
+      seq(seq const& other) : state(std::make_shared<storage>(*other.state)) {}
       seq(seq&&) = default;
       ~seq() = default;
 
@@ -213,7 +213,14 @@ namespace daggr::node {
       // FIXME: Make alignment smarter than this.
       struct storage {
         storage() = default;
-        template <class P>
+        template <class P, class =
+          std::enable_if_t<
+            !std::is_same_v<
+              std::decay_t<P>,
+              storage
+            >
+          >
+        >
         storage(P&& prod) :
           prod(std::forward<P>(prod))
         {}
@@ -222,8 +229,9 @@ namespace daggr::node {
           prod(std::forward<P>(prod)),
           cons(std::forward<C>(cons))
         {}
-        storage(storage const&) = delete;
-        storage(storage&&) = delete;
+        storage(storage const&) = default;
+        storage(storage&&) = default;
+        ~storage() = default;
 
         Producer prod;
         Consumer cons;

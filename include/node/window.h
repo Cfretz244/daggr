@@ -17,6 +17,25 @@
 
 namespace daggr::node {
 
+  template <class T>
+  struct window_entry {
+    template <class... Args>
+    explicit window_entry(clock::time_point ts, Args&&... the_args) :
+      ts(ts),
+      data(std::forward<Args>(the_args)...)
+    {}
+    window_entry(window_entry const&) = default;
+    window_entry(window_entry&&) = default;
+    ~window_entry() = default;
+
+    bool operator <(window_entry const& other) const noexcept {
+      return ts < other.ts;
+    }
+
+    clock::time_point ts;
+    T data;
+  };
+
   template <class Graph>
   class win {
 
@@ -32,32 +51,13 @@ namespace daggr::node {
       /*----- Public Types -----*/
 
       template <class Input>
-      struct window_entry {
-        template <class... Args>
-        explicit window_entry(clock::time_point ts, Args&&... the_args) :
-          ts(ts),
-          data(std::forward<Args>(the_args)...)
-        {}
-        window_entry(window_entry const&) = default;
-        window_entry(window_entry&&) = default;
-        ~window_entry() = default;
-
-        bool operator <(window_entry const& other) const noexcept {
-          return ts < other.ts;
-        }
-
-        clock::time_point ts;
-        intermediate_apply_result_t<Input> data;
-      };
-
-      template <class Input>
       struct is_applicable : Graph::template is_applicable<Input> {};
       template <class Input>
       static constexpr auto is_applicable_v = is_applicable<Input>::value;
 
       template <class Input>
       struct apply_result {
-        using type = std::set<window_entry<Input>>;
+        using type = std::set<window_entry<intermediate_apply_result_t<Input>>>;
       };
       template <class Input>
       using apply_result_t = typename apply_result<Input>::type;
@@ -81,7 +81,7 @@ namespace daggr::node {
           std::is_default_constructible_v<G>
         >
       >
-      explicit win(clock::duration window_size) : window_size(window_size) {}
+      explicit win(clock::duration window_size) : state(std::make_shared<storage>(window_size)) {}
       template <class G, class =
         std::enable_if_t<
           std::is_same_v<
@@ -91,21 +91,10 @@ namespace daggr::node {
         >
       >
       win(clock::duration window_size, G&& graph) :
-        window_size(window_size),
-        graph(std::forward<G>(graph))
+        state(std::make_shared<storage>(window_size, std::forward<G>(graph)))
       {}
-      win(win const& other) {
-        // XXX: If the graph is executing, this won't go well.
-        [[maybe_unused]] std::lock_guard guard(other.lock);
-        graph = other.graph;
-        state = other.state;
-      }
-      win(win&& other) noexcept {
-        // XXX: If the graph is executing, this won't go well.
-        [[maybe_unused]] std::lock_guard guard(other.lock);
-        graph = std::move(other.graph);
-        state = std::move(other.state);
-      }
+      win(win const& other) : state(std::make_shared<storage>(*other.storage)) {}
+      win(win&&) = default;
       ~win() = default;
 
       /*----- Operators -----*/
@@ -187,26 +176,27 @@ namespace daggr::node {
         >
       >
       void execute(Scheduler& sched, Input&& in, Then&& next = detail::noop_v, clock::time_point ts = clock::now()) {
-        // Locate/generate the state for this graph specialization.
-        auto state = locate_state<std::decay_t<Input>>(typeid(in));
-
         // Defer to our graph and inject ourselves as a continuation.
-        auto winlen = window_size;
-        graph.execute(sched, std::forward<Input>(in),
-            [state = std::move(state), next = std::forward<Then>(next), ts, winlen] (auto&& out) mutable {
+        auto copy = state;
+        std::type_index idx = typeid(in);
+        state->graph.execute(sched, std::forward<Input>(in),
+            [state = std::move(copy), idx = std::move(idx), next = std::forward<Then>(next), ts] (auto&& out) mutable {
+          // Locate/generate the state for this graph specialization.
+          auto& wstate = state->template locate_window<std::decay_t<Input>>(idx);
+
           // FIXME: Slow af, will require more consideration.
           // Insert the value from this invocation into the window and run any necessary expirations.
           auto window = [&] {
             auto now = clock::now();
-            [[maybe_unused]] std::lock_guard guard(state->lock);
+            [[maybe_unused]] std::lock_guard guard(wstate.lock);
 
             // Insert
-            auto& window = state->window;
+            auto& window = wstate.window;
             window.emplace(ts, std::forward<decltype(out)>(out));
 
             // Expire.
             auto it = window.begin();
-            while (it->ts - now > winlen && it != window.end()) it = window.erase(it);
+            while (it->ts - now > state->window_size && it != window.end()) it = window.erase(it);
 
             // Return.
             return window;
@@ -255,30 +245,66 @@ namespace daggr::node {
         apply_result_t<Input> window;
       };
 
-      /*----- Private Helpers -----*/
+      struct storage {
 
-      template <class Input>
-      std::shared_ptr<window_state<Input>> locate_state(std::type_index idx) {
-        // Grab our state, construct it if necessary
-        [[maybe_unused]] std::lock_guard guard(lock);
-        auto& ptr = state[idx];
-        if (!ptr) {
-          auto del = [] (void* ptr) { delete reinterpret_cast<window_state<Input>*>(ptr); };
-          ptr = std::shared_ptr<void>(new window_state<Input>, +del);
+        /*----- Types -----*/
+
+        using window_ptr = std::unique_ptr<void, void (*) (void*)>;
+
+        /*----- Lifecycle Functions -----*/
+
+        template <class G = Graph, class =
+          std::enable_if_t<
+            std::is_default_constructible_v<G>
+          >
+        >
+        explicit storage(clock::duration window_size) :
+          window_size(window_size)
+        {}
+        storage(clock::duration window_size, Graph graph) :
+          graph(std::move(graph)),
+          window_size(window_size)
+        {}
+        storage(storage const& other) :
+          graph(other.graph),
+          window_size(other.window_size),
+          windows(other.windows)
+        {}
+        storage(storage&& other) :
+          graph(std::move(other.graph)),
+          window_size(other.window_size),
+          windows(std::move(other.windows))
+        {}
+        ~storage() = default;
+
+        /*----- API -----*/
+
+        template <class Input>
+        window_state<Input>& locate_window(std::type_index idx) {
+          // Grab our state, construct it if necessary
+          [[maybe_unused]] std::lock_guard guard(lock);
+          auto found = windows.find(idx);
+          if (found == windows.end()) {
+            auto del = [] (void* ptr) { delete reinterpret_cast<window_state<Input>*>(ptr); };
+            auto [it, succ] = windows.emplace(idx, window_ptr(new window_state<Input>, +del));
+            assert(succ);
+            found = it;
+          }
+          return *reinterpret_cast<window_state<Input>*>(found->second.get());
         }
 
-        // Alias our void pointer so we don't have to keep putting casts all over the place.
-        auto* raw = reinterpret_cast<window_state<Input>*>(ptr.get());
-        return std::shared_ptr<window_state<Input>>(ptr, raw);
-      }
+        /*----- Members -----*/
+
+        Graph graph;
+        std::mutex lock;
+        clock::duration const window_size;
+        std::unordered_map<std::type_index, window_ptr> windows;
+
+      };
 
       /*----- Private Members -----*/
 
-      Graph graph;
-
-      std::mutex mutable lock;
-      clock::duration window_size;
-      std::unordered_map<std::type_index, std::shared_ptr<void>> state;
+      std::shared_ptr<storage> state;
 
   };
 
