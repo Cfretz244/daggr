@@ -3,6 +3,9 @@
 
 /*----- System Includes -----*/
 
+#include <chrono>
+#include <optional>
+#include <functional>
 #include <type_traits>
 
 /*----- Type Declarations -----*/
@@ -17,6 +20,10 @@ namespace daggr {
     class seq;
     template <class...>
     class all;
+    template <class>
+    class win;
+
+    using clock = std::chrono::steady_clock;
 
   }
 
@@ -41,6 +48,7 @@ namespace daggr {
 #include "node/comp.h"
 #include "node/seq.h"
 #include "node/all.h"
+#include "node/window.h"
 
 /*----- Globals -----*/
 

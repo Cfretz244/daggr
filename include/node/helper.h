@@ -40,6 +40,9 @@ namespace daggr::node::detail {
     }
   }
 
+  template <class MaybeNode>
+  using normalize_t = std::decay_t<decltype(normalize(std::declval<MaybeNode>()))>;
+
 }
 
 #endif

@@ -1,10 +1,6 @@
 #ifndef DAGGR_ALL_H
 #define DAGGR_ALL_H
 
-/*----- System Includes -----*/
-
-#include <type_traits>
-
 /*----- Local Includes -----*/
 
 #include "../node.h"
@@ -98,7 +94,7 @@ namespace daggr::node {
         >
       >
       all(Ns&&... nodes) :
-        nodes(std::make_shared<std::tuple<Nodes...>>(std::forward<Ns>(nodes)...))
+        nodes(std::make_shared<std::tuple<Nodes...>>(detail::normalize(std::forward<Ns>(nodes))...))
       {}
 
       all(all const& other) : nodes(std::make_shared<std::tuple<Nodes...>>(*other.nodes)) {}
@@ -122,12 +118,12 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      auto operator ()(Arg&& arg) {
+      auto operator ()(Arg&& arg, clock::time_point ts = clock::now()) {
         sched::eager sched;
         std::optional<apply_result_t<Arg>> opt;
         execute(sched, std::forward<Arg>(arg), [&] (auto&& res) {
           opt.emplace(std::forward<decltype(res)>(res));
-        });
+        }, ts);
         return *std::move(opt);
       }
 
@@ -138,9 +134,9 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      void operator ()(Arg&& arg) {
+      void operator ()(Arg&& arg, clock::time_point ts = clock::now()) {
         sched::eager sched;
-        execute(sched, std::forward<Arg>(arg));
+        execute(sched, std::forward<Arg>(arg), detail::noop_v, ts);
       }
 
       template <class Arg = meta::none,
@@ -150,12 +146,12 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      auto operator ()() {
+      auto operator ()(clock::time_point ts = clock::now()) {
         sched::eager sched;
         std::optional<apply_result_t<Arg>> opt;
         execute(sched, meta::none_v, [&] (auto&& res) {
           opt.emplace(std::forward<decltype(res)>(res));
-        });
+        }, ts);
         return *std::move(opt);
       }
 
@@ -166,9 +162,9 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      void operator ()() {
+      void operator ()(clock::time_point ts = clock::now()) {
         sched::eager sched;
-        execute(sched, meta::none_v);
+        execute(sched, meta::none_v, detail::noop_v, ts);
       }
 
       /*----- Public API -----*/
@@ -178,17 +174,17 @@ namespace daggr::node {
           is_applicable_v<Input>
         >
       >
-      void execute(Scheduler& sched, Input&& in, Then&& next = detail::noop_v) {
+      void execute(Scheduler& sched, Input&& in, Then&& next = detail::noop_v, clock::time_point ts = clock::now()) {
         // Get a tuple to hold the calculated results.
         auto state = std::make_shared<execution_storage<Input>>(std::forward<Input>(in));
-        
+
         // Statically iterate over each contained node.
         auto copy = nodes;
         meta::for_each_t<Nodes...>([&] (auto idx, auto) {
           // Create an intermediate computation to run this node, and schedule it.
-          auto intermediate = [nodes = copy, &sched, state, next] {
+          auto intermediate = [nodes = copy, &sched, state, next, ts] {
             auto& curr = std::get<decltype(idx) {}>(*nodes);
-            curr.execute(sched, state->in, [state = std::move(state), next] (auto&& out) {
+            curr.execute(sched, state->in, [state = std::move(state), next] (auto&& out) mutable {
               // Write the value in for this node of the computation.
               std::get<decltype(idx) {}>(state->store) = std::forward<decltype(out)>(out);
 
@@ -196,7 +192,7 @@ namespace daggr::node {
               if (state->remaining.fetch_sub(1) == 1) {
                 meta::apply(next, std::move(state->store));
               }
-            });
+            }, ts);
           };
 
           // If we're working with the final node, yield the current thread and execute
@@ -208,22 +204,30 @@ namespace daggr::node {
 
       template <class Then>
       auto then(Then&& next) const& {
-        return node::seq {*this, detail::normalize(std::forward<Then>(next))};
+        return node::seq {*this, std::forward<Then>(next)};
       }
 
       template <class Then>
       auto then(Then&& next) && {
-        return node::seq {std::move(*this), detail::normalize(std::forward<Then>(next))};
+        return node::seq {std::move(*this), std::forward<Then>(next)};
       }
 
       template <class... Ns>
       auto join(Ns&&... nodes) const& {
-        return node::all {*this, detail::normalize(std::forward<Ns>(nodes))...};
+        return node::all {*this, std::forward<Ns>(nodes)...};
       }
 
       template <class... Ns>
       auto join(Ns&&... nodes) && {
-        return node::all {std::move(*this), detail::normalize(std::forward<Ns>(nodes))...};
+        return node::all {std::move(*this), std::forward<Ns>(nodes)...};
+      }
+
+      auto window(clock::duration window_size) const& {
+        return node::win {window_size, *this};
+      }
+
+      auto window(clock::duration window_size) && {
+        return node::win {window_size, std::move(*this)};
       }
 
     private:
@@ -249,7 +253,7 @@ namespace daggr::node {
   };
 
   template <class... Ts>
-  all(Ts...) -> all<Ts...>;
+  all(Ts...) -> all<detail::normalize_t<Ts>...>;
 
 }
 

@@ -1,10 +1,6 @@
 #ifndef DAGGR_SEQUENCE_H
 #define DAGGR_SEQUENCE_H
 
-/*----- System Includes -----*/
-
-#include <type_traits>
-
 /*----- Local Includes -----*/
 
 #include "../node.h"
@@ -77,23 +73,28 @@ namespace daggr::node {
         >
       >
       explicit seq(P&& prod) :
-        state(std::make_shared<storage>(std::forward<P>(prod)))
+        state(std::make_shared<storage>(detail::normalize(std::forward<P>(prod))))
       {}
       template <class P, class C, class =
         std::enable_if_t<
           std::is_same_v<
-            std::decay_t<P>,
+            detail::normalize_t<P>,
             Producer
           >
           &&
           std::is_same_v<
-            std::decay_t<C>,
+            detail::normalize_t<C>,
             Consumer
           >
         >
       >
       explicit seq(P&& prod, C&& cons) :
-        state(std::make_shared<storage>(std::forward<P>(prod), std::forward<C>(cons)))
+        state(
+          std::make_shared<storage>(
+            detail::normalize(std::forward<P>(prod)),
+            detail::normalize(std::forward<C>(cons))
+          )
+        )
       {}
 
       seq(seq const&) = default;
@@ -112,12 +113,12 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      auto operator ()(Arg&& arg) {
+      auto operator ()(Arg&& arg, clock::time_point ts = clock::now()) {
         sched::eager sched;
         std::optional<apply_result_t<Arg>> opt;
         execute(sched, std::forward<Arg>(arg), [&] (auto&& res) {
           opt.emplace(std::forward<decltype(res)>(res));
-        });
+        }, ts);
         return *std::move(opt);
       }
 
@@ -128,9 +129,9 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      void operator ()(Arg&& arg) {
+      void operator ()(Arg&& arg, clock::time_point ts = clock::now()) {
         sched::eager sched;
-        execute(sched, std::forward<Arg>(arg));
+        execute(sched, std::forward<Arg>(arg), detail::noop_v, ts);
       }
 
       template <class Arg = meta::none,
@@ -140,12 +141,12 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      auto operator ()() {
+      auto operator ()(clock::time_point ts = clock::now()) {
         sched::eager sched;
         std::optional<apply_result_t<Arg>> opt;
         execute(sched, meta::none_v, [&] (auto&& res) {
           opt.emplace(std::forward<decltype(res)>(res));
-        });
+        }, ts);
         return *std::move(opt);
       }
 
@@ -156,9 +157,9 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      void operator ()() {
+      void operator ()(clock::time_point ts = clock::now()) {
         sched::eager sched;
-        execute(sched, meta::none_v);
+        execute(sched, meta::none_v, detail::noop_v, ts);
       }
 
       /*----- Public API -----*/
@@ -168,40 +169,48 @@ namespace daggr::node {
           is_applicable_v<Input>
         >
       >
-      void execute(Scheduler& sched, Input&& in, Then&& next = detail::noop_v) {
+      void execute(Scheduler& sched, Input&& in, Then&& next = detail::noop_v, clock::time_point ts = clock::now()) {
         auto copy = state;
         state->prod.execute(sched, std::forward<Input>(in),
-            [&sched, state = std::move(copy), next = std::forward<Then>(next)] (auto&& tmp) {
+            [&sched, state = std::move(copy), next = std::forward<Then>(next), ts] (auto&& tmp) mutable {
           state->cons.execute(sched,
-              std::forward<decltype(tmp)>(tmp), std::move(next));
-        });
+              std::forward<decltype(tmp)>(tmp), std::move(next), ts);
+        }, ts);
       }
 
       template <class Then>
       auto then(Then&& next) const& {
-        return node::seq {*this, detail::normalize(std::forward<Then>(next))};
+        return node::seq {*this, std::forward<Then>(next)};
       }
 
       template <class Then>
       auto then(Then&& next) && {
-        return node::seq {std::move(*this), detail::normalize(std::forward<Then>(next))};
+        return node::seq {std::move(*this), std::forward<Then>(next)};
       }
 
       template <class... Nodes>
       auto join(Nodes&&... nodes) const& {
-        return node::all {*this, detail::normalize(std::forward<Nodes>(nodes))...};
+        return node::all {*this, std::forward<Nodes>(nodes)...};
       }
 
       template <class... Nodes>
       auto join(Nodes&&... nodes) && {
-        return node::all {std::move(*this), detail::normalize(std::forward<Nodes>(nodes))...};
+        return node::all {std::move(*this), std::forward<Nodes>(nodes)...};
+      }
+
+      auto window(clock::duration window_size) const& {
+        return node::win {window_size, *this};
+      }
+
+      auto window(clock::duration window_size) && {
+        return node::win {window_size, std::move(*this)};
       }
 
     private:
 
       /*----- Private Types -----*/
 
-      // Make alignment smarter than this.
+      // FIXME: Make alignment smarter than this.
       struct storage {
         storage() = default;
         template <class P>
@@ -216,8 +225,8 @@ namespace daggr::node {
         storage(storage const&) = delete;
         storage(storage&&) = delete;
 
-        alignas(64) Producer prod;
-        alignas(64) Consumer cons;
+        Producer prod;
+        Consumer cons;
       };
 
       /*----- Private Members -----*/
@@ -227,7 +236,7 @@ namespace daggr::node {
   };
 
   template <class P, class C>
-  seq(P, C) -> seq<P, C>;
+  seq(P, C) -> seq<detail::normalize_t<P>, detail::normalize_t<C>>;
 
   template <class P, class C>
   using sequence = seq<P, C>;
