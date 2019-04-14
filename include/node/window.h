@@ -196,7 +196,7 @@ namespace daggr::node {
 
             // Expire.
             auto it = window.begin();
-            while (it->ts - now > state->window_size && it != window.end()) it = window.erase(it);
+            while (now - it->ts > state->window_size && it != window.end()) it = window.erase(it);
 
             // Return.
             return window;
