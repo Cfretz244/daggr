@@ -177,6 +177,7 @@ namespace daggr::node {
       >
       void execute(Scheduler& sched, Input&& in, Then&& next = detail::noop_v, clock::time_point ts = clock::now()) {
         // Defer to our graph and inject ourselves as a continuation.
+        // FIXME: typeid will do the wrong thing and be expensive for polymorphic types. Consider looking into ctti
         auto copy = state;
         std::type_index idx = typeid(in);
         state->graph.execute(sched, std::forward<Input>(in),
@@ -196,7 +197,9 @@ namespace daggr::node {
 
             // Expire.
             auto it = window.begin();
-            while (now - it->ts > state->window_size && it != window.end()) it = window.erase(it);
+            while (it != window.end() && now - it->ts > state->window_size) {
+              it = window.erase(it);
+            }
 
             // Return.
             return window;
