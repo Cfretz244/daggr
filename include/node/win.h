@@ -105,12 +105,7 @@ namespace daggr::node {
         *this = std::move(tmp);
         return *this;
       }
-      win& operator =(win&& other) noexcept {
-        if (this == &other) return *this;
-        this->~win();
-        new(this) win(std::move(other));
-        return *this;
-      }
+      win& operator =(win&&) = default;
 
       template <class Arg,
         std::enable_if_t<

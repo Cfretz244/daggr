@@ -48,7 +48,7 @@ namespace daggr {
 #include "node/comp.h"
 #include "node/seq.h"
 #include "node/all.h"
-#include "node/window.h"
+#include "node/win.h"
 
 /*----- Globals -----*/
 

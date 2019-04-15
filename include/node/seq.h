@@ -67,9 +67,11 @@ namespace daggr::node {
       template <class P, class =
         std::enable_if_t<
           std::is_same_v<
-            std::decay_t<P>,
+            detail::normalize_t<P>,
             Producer
           >
+          &&
+          std::is_default_constructible_v<Consumer>
         >
       >
       explicit seq(P&& prod) :
@@ -103,7 +105,12 @@ namespace daggr::node {
 
       /*----- Operators -----*/
 
-      seq& operator =(seq const&) = default;
+      seq& operator =(seq const& other) {
+        if (this == &other) return *this;
+        auto tmp {other};
+        *this = std::move(tmp);
+        return *this;
+      }
       seq& operator =(seq&&) = default;
 
       template <class Arg,

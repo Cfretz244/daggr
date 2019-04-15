@@ -179,10 +179,10 @@ namespace daggr::node {
         auto state = std::make_shared<execution_storage<Input>>(std::forward<Input>(in));
 
         // Statically iterate over each contained node.
-        auto copy = nodes;
         meta::for_each_t<Nodes...>([&] (auto idx, auto) {
           // Create an intermediate computation to run this node, and schedule it.
-          auto intermediate = [nodes = copy, &sched, state, next, ts] {
+          auto copy = nodes;
+          auto intermediate = [nodes = std::move(copy), &sched, state, next, ts] {
             auto& curr = std::get<decltype(idx) {}>(*nodes);
             curr.execute(sched, state->in, [state = std::move(state), next] (auto&& out) mutable {
               // Write the value in for this node of the computation.
