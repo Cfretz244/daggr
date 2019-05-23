@@ -11,69 +11,28 @@
 namespace daggr::node {
 
   namespace detail {
-    template <class Input>
-    struct bound_child_is_applicable {
-      template <class Node>
-      struct perform : child_is_applicable<Node, Input> {};
-    };
-
-    template <class Input>
-    struct bound_child_apply_result {
-      template <class Node>
-      struct perform : child_apply_result<Node, Input> {};
-    };
-
-    template <class Input, class... Nodes>
-    struct intermediate_storage :
-      meta::transform_type_sequence<
-        bound_child_apply_result<Input>::template perform,
-        Nodes...
-      >
-    {};
-    template <class Input, class... Nodes>
-    using intermediate_storage_t = typename intermediate_storage<Input, Nodes...>::type;
+    template <class Arg, class... Args>
+    void expand_tuple_impl(dart::packet& pkt, Arg&& arg, Args&&... the_args) {
+      if constexpr (sizeof...(Args)) {
+        pkt.push_back(std::forward<Arg>(arg));
+        expand_tuple_impl(pkt, std::forward<Args>(the_args)...);
+      }
+    }
+    template <class Tup, size_t... idxs>
+    dart::packet expand_tuple(Tup&& tuple, std::index_sequence<idxs...>) {
+      auto arr = dart::packet::make_array();
+      expand_tuple_impl(arr, std::get<idxs>(std::forward<Tup>(tuple))...);
+      return arr;
+    }
   }
 
   template <class... Nodes>
   class all {
 
+    template <class>
+    using dart_t = dart::packet;
+
     public:
-
-      /*----- Public Types -----*/
-
-      template <class Input>
-      struct is_applicable :
-        std::conjunction<
-          meta::is_forward_constructible<Input>,
-          meta::all_of<
-            detail::bound_child_is_applicable<std::decay_t<Input> const&>::template perform,
-            Nodes...
-          >
-        >
-      {};
-      template <class Input>
-      static constexpr auto is_applicable_v = is_applicable<Input>::value;
-
-      template <class Input>
-      struct apply_result {
-        using type = meta::filter_tuple_none_t<
-          detail::intermediate_storage_t<std::decay_t<Input> const&, Nodes...>
-        >;
-      };
-      template <class Input>
-      using apply_result_t = typename apply_result<Input>::type;
-
-      template <class Input>
-      struct has_result :
-        std::conjunction<
-          is_applicable<Input>,
-          std::negation<
-            std::is_same<apply_result_t<Input>, meta::none>
-          >
-        >
-      {};
-      template <class Input>
-      static constexpr auto has_result_v = has_result<Input>::value;
 
       /*----- Lifecycle Functions -----*/
 
@@ -111,88 +70,36 @@ namespace daggr::node {
       }
       all& operator =(all&&) = default;
 
-      template <class Arg,
-        std::enable_if_t<
-          has_result_v<Arg>
-          &&
-          is_applicable_v<Arg>
-        >* = nullptr
-      >
-      auto operator ()(Arg&& arg, clock::time_point ts = clock::now()) {
+      auto operator ()(dart::packet const& pkt) {
+        dart::packet opt;
         sched::eager sched;
-        std::optional<apply_result_t<Arg>> opt;
-        execute(sched, std::forward<Arg>(arg), [&] (auto&& res) {
-          opt.emplace(std::forward<decltype(res)>(res));
-        }, ts);
-        return *std::move(opt);
-      }
-
-      template <class Arg,
-        std::enable_if_t<
-          !has_result_v<Arg>
-          &&
-          is_applicable_v<Arg>
-        >* = nullptr
-      >
-      void operator ()(Arg&& arg, clock::time_point ts = clock::now()) {
-        sched::eager sched;
-        execute(sched, std::forward<Arg>(arg), detail::noop_v, ts);
-      }
-
-      template <class Arg = meta::none,
-        std::enable_if_t<
-          has_result_v<Arg>
-          &&
-          is_applicable_v<Arg>
-        >* = nullptr
-      >
-      auto operator ()(clock::time_point ts = clock::now()) {
-        sched::eager sched;
-        std::optional<apply_result_t<Arg>> opt;
-        execute(sched, meta::none_v, [&] (auto&& res) {
-          opt.emplace(std::forward<decltype(res)>(res));
-        }, ts);
-        return *std::move(opt);
-      }
-
-      template <class Arg = meta::none,
-        std::enable_if_t<
-          !has_result_v<Arg>
-          &&
-          is_applicable_v<Arg>
-        >* = nullptr
-      >
-      void operator ()(clock::time_point ts = clock::now()) {
-        sched::eager sched;
-        execute(sched, meta::none_v, detail::noop_v, ts);
+        execute(sched, pkt, [&] (auto res) { opt = std::move(res); });
+        return opt;
       }
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Input, class Then = detail::noop_t, class =
-        std::enable_if_t<
-          is_applicable_v<Input>
-        >
-      >
-      void execute(Scheduler& sched, Input&& in, Then&& next = detail::noop_v, clock::time_point ts = clock::now()) {
+      template <class Scheduler, class Then = detail::noop_t>
+      void execute(Scheduler& sched, dart::packet const& pkt, Then&& next = detail::noop_v) {
         // Get a tuple to hold the calculated results.
-        auto state = std::make_shared<execution_storage<Input>>(std::forward<Input>(in));
+        auto state = std::make_shared<execution_storage>(pkt);
 
         // Statically iterate over each contained node.
         meta::for_each_t<Nodes...>([&] (auto idx, auto) {
           // Create an intermediate computation to run this node, and schedule it.
           auto copy = nodes;
-          auto intermediate = [nodes = std::move(copy), &sched, state, next, ts] {
+          auto intermediate = [nodes = std::move(copy), &sched, state, next] {
             auto& curr = std::get<decltype(idx) {}>(*nodes);
-            curr.execute(sched, state->in, [state = std::move(state), next] (auto&& out) mutable {
+            curr.execute(sched, state->in, [state = std::move(state), next] (auto out) mutable {
               // Write the value in for this node of the computation.
-              std::get<decltype(idx) {}>(state->store) = std::forward<decltype(out)>(out);
+              std::get<decltype(idx) {}>(state->store) = std::move(out);
 
               // Call into our continuation if we were the final node of the all.
               if (state->remaining.fetch_sub(1) == 1) {
-                meta::apply(next, std::move(state->store));
+                std::invoke(next,
+                    detail::expand_tuple(std::move(state->store), std::make_index_sequence<sizeof...(Nodes)> {}));
               }
-            }, ts);
+            });
           };
 
           // If we're working with the final node, yield the current thread and execute
@@ -222,28 +129,18 @@ namespace daggr::node {
         return node::all {std::move(*this), std::forward<Ns>(nodes)...};
       }
 
-      auto window(clock::duration window_size) const& {
-        return node::win {window_size, *this};
-      }
-
-      auto window(clock::duration window_size) && {
-        return node::win {window_size, std::move(*this)};
-      }
-
     private:
 
       /*----- Private Types -----*/
 
-      template <class Input>
       struct execution_storage {
-        template <class In>
-        execution_storage(In&& in) :
-          in(std::forward<In>(in)),
+        explicit execution_storage(dart::packet const& in) :
+          in(in),
           remaining(sizeof...(Nodes))
         {}
-        std::decay_t<Input> const in;
+        dart::packet const in;
         std::atomic<int64_t> remaining;
-        detail::intermediate_storage_t<Input, Nodes...> store;
+        std::tuple<dart_t<Nodes>...> store;
       };
 
       /*----- Private Members -----*/

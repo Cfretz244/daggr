@@ -22,40 +22,6 @@ namespace daggr::node {
 
     public:
 
-      /*----- Public Types -----*/
-
-      template <class Input>
-      struct is_applicable :
-        meta::sequence_is_walkable<
-          detail::child_is_applicable,
-          detail::child_apply_result,
-          Input,
-          Producer,
-          Consumer
-        >
-      {};
-      template <class Input>
-      static constexpr auto is_applicable_v = is_applicable<Input>::value;
-
-      template <class Input>
-      struct apply_result {
-        using type = typename is_applicable<Input>::result_type;
-      };
-      template <class Input>
-      using apply_result_t = typename apply_result<Input>::type;
-
-      template <class Input>
-      struct has_result :
-        std::conjunction<
-          is_applicable<Input>,
-          std::negation<
-            std::is_same<apply_result_t<Input>, meta::none>
-          >
-        >
-      {};
-      template <class Input>
-      static constexpr auto has_result_v = has_result<Input>::value;
-
       /*----- Lifecycle Functions -----*/
 
       template <class P = Producer, class C = Consumer, class =
@@ -113,76 +79,22 @@ namespace daggr::node {
       }
       seq& operator =(seq&&) = default;
 
-      template <class Arg,
-        std::enable_if_t<
-          has_result_v<Arg>
-          &&
-          is_applicable_v<Arg>
-        >* = nullptr
-      >
-      auto operator ()(Arg&& arg, clock::time_point ts = clock::now()) {
+      dart::packet operator ()(dart::packet const& pkt) {
+        dart::packet opt;
         sched::eager sched;
-        std::optional<apply_result_t<Arg>> opt;
-        execute(sched, std::forward<Arg>(arg), [&] (auto&& res) {
-          opt.emplace(std::forward<decltype(res)>(res));
-        }, ts);
-        return *std::move(opt);
-      }
-
-      template <class Arg,
-        std::enable_if_t<
-          !has_result_v<Arg>
-          &&
-          is_applicable_v<Arg>
-        >* = nullptr
-      >
-      void operator ()(Arg&& arg, clock::time_point ts = clock::now()) {
-        sched::eager sched;
-        execute(sched, std::forward<Arg>(arg), detail::noop_v, ts);
-      }
-
-      template <class Arg = meta::none,
-        std::enable_if_t<
-          has_result_v<Arg>
-          &&
-          is_applicable_v<Arg>
-        >* = nullptr
-      >
-      auto operator ()(clock::time_point ts = clock::now()) {
-        sched::eager sched;
-        std::optional<apply_result_t<Arg>> opt;
-        execute(sched, meta::none_v, [&] (auto&& res) {
-          opt.emplace(std::forward<decltype(res)>(res));
-        }, ts);
-        return *std::move(opt);
-      }
-
-      template <class Arg = meta::none,
-        std::enable_if_t<
-          !has_result_v<Arg>
-          &&
-          is_applicable_v<Arg>
-        >* = nullptr
-      >
-      void operator ()(clock::time_point ts = clock::now()) {
-        sched::eager sched;
-        execute(sched, meta::none_v, detail::noop_v, ts);
+        execute(sched, pkt, [&] (auto res) { opt = std::move(res); });
+        return opt;
       }
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Input, class Then = detail::noop_t, class =
-        std::enable_if_t<
-          is_applicable_v<Input>
-        >
-      >
-      void execute(Scheduler& sched, Input&& in, Then&& next = detail::noop_v, clock::time_point ts = clock::now()) {
+      template <class Scheduler, class Then = detail::noop_t>
+      void execute(Scheduler& sched, dart::packet const& pkt, Then&& next = detail::noop_v) {
         auto copy = state;
-        state->prod.execute(sched, std::forward<Input>(in),
-            [&sched, state = std::move(copy), next = std::forward<Then>(next), ts] (auto&& tmp) mutable {
-          state->cons.execute(sched,
-              std::forward<decltype(tmp)>(tmp), std::move(next), ts);
-        }, ts);
+        state->prod.execute(sched, pkt,
+            [&sched, state = std::move(copy), next = std::forward<Then>(next)] (auto tmp) mutable {
+          state->cons.execute(sched, std::move(tmp), std::move(next));
+        });
       }
 
       template <class Then>
@@ -203,14 +115,6 @@ namespace daggr::node {
       template <class... Nodes>
       auto join(Nodes&&... nodes) && {
         return node::all {std::move(*this), std::forward<Nodes>(nodes)...};
-      }
-
-      auto window(clock::duration window_size) const& {
-        return node::win {window_size, *this};
-      }
-
-      auto window(clock::duration window_size) && {
-        return node::win {window_size, std::move(*this)};
       }
 
     private:

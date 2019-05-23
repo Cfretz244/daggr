@@ -3,6 +3,7 @@
 
 /*----- System Includes -----*/
 
+#include <dart.h>
 #include <chrono>
 #include <optional>
 #include <functional>
@@ -20,8 +21,6 @@ namespace daggr {
     class seq;
     template <class...>
     class all;
-    template <class>
-    class win;
 
     using clock = std::chrono::steady_clock;
 
@@ -48,14 +47,21 @@ namespace daggr {
 #include "node/comp.h"
 #include "node/seq.h"
 #include "node/all.h"
-#include "node/win.h"
 
 /*----- Globals -----*/
 
 namespace daggr {
 
+  namespace detail {
+    struct noop_comp {
+      dart::packet operator ()(dart::packet const& pkt) {
+        return pkt;
+      }
+    };
+  }
+
   // Used to bootstrap the chaining API.
-  inline daggr::node::comp<daggr::meta::none> const noop;
+  inline daggr::node::comp<detail::noop_comp> const noop;
 
 }
 
