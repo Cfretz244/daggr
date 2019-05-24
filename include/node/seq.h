@@ -95,8 +95,8 @@ namespace daggr::node {
           Packet&& pkt = std::decay_t<Packet>::make_null(), Then&& next = detail::noop_v) {
         auto copy = state;
         state->prod.execute(sched, std::forward<Packet>(pkt),
-            [&sched, state = std::move(copy), next = std::forward<Then>(next)] (auto tmp) mutable {
-          state->cons.execute(sched, std::move(tmp), std::move(next));
+            [&sched, state = std::move(copy), next = std::forward<Then>(next)] (auto&& tmp) mutable {
+          state->cons.execute(sched, std::forward<decltype(tmp)>(tmp), std::move(next));
         });
       }
 

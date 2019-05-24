@@ -88,7 +88,7 @@ namespace daggr::node {
       void execute(Scheduler& sched,
           Packet&& pkt = std::decay_t<Packet>::make_null(), Then&& next = detail::noop_v) {
         // Get a tuple to hold the calculated results.
-        auto state = std::make_shared<execution_storage<Packet>>(std::forward<Packet>(pkt));
+        auto state = std::make_shared<execution_storage>(std::forward<Packet>(pkt));
 
         // Statically iterate over each contained node.
         meta::for_each_t<Nodes...>([&] (auto idx, auto) {
@@ -96,14 +96,13 @@ namespace daggr::node {
           auto copy = nodes;
           auto intermediate = [nodes = std::move(copy), &sched, state, next] {
             auto& curr = std::get<decltype(idx) {}>(*nodes);
-            curr.execute(sched, state->in, [state = std::move(state), next] (auto out) mutable {
+            curr.execute(sched, state->in, [state = std::move(state), next] (auto&& out) mutable {
               // Write the value in for this node of the computation.
-              std::get<decltype(idx) {}>(state->store) = std::move(out);
+              state->store.set(decltype(idx) {}, std::move(out));
 
               // Call into our continuation if we were the final node of the all.
               if (state->remaining.fetch_sub(1) == 1) {
-                std::invoke(next,
-                    detail::expand_tuple(std::move(state->store), std::make_index_sequence<sizeof...(Nodes)> {}));
+                std::invoke(next, std::move(state->store));
               }
             });
           };
@@ -139,16 +138,17 @@ namespace daggr::node {
 
       /*----- Private Types -----*/
 
-      template <class Packet>
       struct execution_storage {
         template <class P>
         explicit execution_storage(P&& in) :
           in(std::forward<P>(in)),
           remaining(sizeof...(Nodes))
-        {}
-        Packet const in;
+        {
+          store.resize(sizeof...(Nodes));
+        }
+        dart::packet const in;
+        dart::packet::array store;
         std::atomic<int64_t> remaining;
-        std::tuple<dart_t<Nodes>...> store;
       };
 
       /*----- Private Members -----*/
