@@ -21,6 +21,7 @@ namespace daggr {
     class seq;
     template <class...>
     class all;
+    class erased;
 
     using clock = std::chrono::steady_clock;
 
@@ -34,8 +35,17 @@ namespace daggr {
   struct is_node<node::seq<P, C>> : std::true_type {};
   template <class... Ts>
   struct is_node<node::all<Ts...>> : std::true_type {};
+  template <>
+  struct is_node<node::erased> : std::true_type {};
   template <class T>
   constexpr auto is_node_v = is_node<T>::value;
+
+  template <class T>
+  struct is_packet : std::false_type {};
+  template <>
+  struct is_packet<dart::packet> : std::true_type {};
+  template <class T>
+  constexpr auto is_packet_v = is_packet<T>::value;
 
 }
 
@@ -44,6 +54,7 @@ namespace daggr {
 #include "meta/lifecycle_traits.h"
 #include "meta/function_traits.h"
 #include "node/helper.h"
+#include "node/erased.h"
 #include "node/comp.h"
 #include "node/seq.h"
 #include "node/all.h"

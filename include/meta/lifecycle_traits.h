@@ -160,7 +160,7 @@ namespace daggr::meta {
       nonesuch
     >;
     using noncopyable_t = std::conditional_t<
-      (!std::is_copy_constructible_v<Ts> && ...),
+      !(std::is_copy_constructible_v<Ts> && ...),
       copy_guard,
       nonesuch
     >;
@@ -170,7 +170,7 @@ namespace daggr::meta {
       nonesuch
     >;
     using non_copy_assignable_t = std::conditional_t<
-      (!std::is_copy_assignable_v<Ts> && ...),
+      !(std::is_copy_assignable_v<Ts> && ...),
       copy_guard,
       nonesuch
     >;
@@ -212,7 +212,7 @@ namespace daggr::meta {
       nonesuch
     >;
     using nonmoveable_t = std::conditional_t<
-      (!std::is_move_constructible_v<Ts> && ...),
+      !(std::is_move_constructible_v<Ts> && ...),
       move_guard,
       nonesuch
     >;
@@ -222,7 +222,7 @@ namespace daggr::meta {
       nonesuch
     >;
     using non_move_assignable_t = std::conditional_t<
-      (!std::is_move_assignable_v<Ts> && ...),
+      !(std::is_move_assignable_v<Ts> && ...),
       move_guard,
       nonesuch
     >;

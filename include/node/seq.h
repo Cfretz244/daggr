@@ -10,9 +10,6 @@
 
 namespace daggr::node {
 
-  template <class F>
-  class comp;
-
   template <class Producer, class Consumer>
   class seq {
 
@@ -79,19 +76,25 @@ namespace daggr::node {
       }
       seq& operator =(seq&&) = default;
 
-      dart::packet operator ()(dart::packet const& pkt) {
+      template <class Packet = dart::packet, class =
+        std::enable_if_t<
+          is_packet_v<Packet>
+        >
+      >
+      dart::packet operator ()(Packet&& pkt = std::decay_t<Packet>::make_null()) {
         dart::packet opt;
         sched::eager sched;
-        execute(sched, pkt, [&] (auto res) { opt = std::move(res); });
+        execute(sched, std::forward<Packet>(pkt), [&] (auto res) { opt = std::move(res); });
         return opt;
       }
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Then = detail::noop_t>
-      void execute(Scheduler& sched, dart::packet const& pkt, Then&& next = detail::noop_v) {
+      template <class Scheduler, class Packet = dart::packet, class Then = detail::noop_t>
+      void execute(Scheduler& sched,
+          Packet&& pkt = std::decay_t<Packet>::make_null(), Then&& next = detail::noop_v) {
         auto copy = state;
-        state->prod.execute(sched, pkt,
+        state->prod.execute(sched, std::forward<Packet>(pkt),
             [&sched, state = std::move(copy), next = std::forward<Then>(next)] (auto tmp) mutable {
           state->cons.execute(sched, std::move(tmp), std::move(next));
         });

@@ -17,7 +17,14 @@ namespace daggr::node {
   template <class Func>
   class alignas(64) comp {
 
-    static_assert(!is_node_v<std::decay_t<Func>>);
+    static_assert(!is_node_v<Func>);
+    static_assert(
+      std::is_invocable_r_v<dart::packet, Func, dart::heap>
+      ||
+      std::is_invocable_r_v<dart::packet, Func, dart::buffer>
+      ||
+      std::is_invocable_r_v<dart::packet, Func, dart::packet>
+    );
 
     public:
 
@@ -47,18 +54,24 @@ namespace daggr::node {
       comp& operator =(comp const&) = default;
       comp& operator =(comp&&) = default;
 
-      dart::packet operator ()(dart::packet const& pkt) {
+      template <class Packet = dart::packet, class =
+        std::enable_if_t<
+          is_packet_v<Packet>
+        >
+      >
+      dart::packet operator ()(Packet&& pkt = std::decay_t<Packet>::make_null()) {
         dart::packet opt;
         sched::eager sched;
-        execute(sched, pkt, [&] (auto res) { opt = std::move(res); });
+        execute(sched, std::forward<Packet>(pkt), [&] (auto res) { opt = std::move(res); });
         return opt;
       }
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Then = detail::noop_t>
-      void execute(Scheduler&, dart::packet const& pkt, Then&& next = detail::noop_v) {
-        std::invoke(std::forward<Then>(next), std::invoke(func, pkt));
+      template <class Scheduler, class Packet = dart::packet, class Then = detail::noop_t>
+      void execute(Scheduler&,
+          Packet&& pkt = std::decay_t<Packet>::make_null(), Then&& next = detail::noop_v) {
+        std::invoke(std::forward<Then>(next), std::invoke(func, std::forward<Packet>(pkt)));
       }
 
       template <class Then>

@@ -13,8 +13,8 @@ namespace daggr::node {
   namespace detail {
     template <class Arg, class... Args>
     void expand_tuple_impl(dart::packet& pkt, Arg&& arg, Args&&... the_args) {
+      pkt.push_back(std::forward<Arg>(arg));
       if constexpr (sizeof...(Args)) {
-        pkt.push_back(std::forward<Arg>(arg));
         expand_tuple_impl(pkt, std::forward<Args>(the_args)...);
       }
     }
@@ -70,19 +70,25 @@ namespace daggr::node {
       }
       all& operator =(all&&) = default;
 
-      auto operator ()(dart::packet const& pkt) {
+      template <class Packet = dart::packet, class =
+        std::enable_if_t<
+          is_packet_v<Packet>
+        >
+      >
+      dart::packet operator ()(Packet&& pkt = std::decay_t<Packet>::make_null()) {
         dart::packet opt;
         sched::eager sched;
-        execute(sched, pkt, [&] (auto res) { opt = std::move(res); });
+        execute(sched, std::forward<Packet>(pkt), [&] (auto res) { opt = std::move(res); });
         return opt;
       }
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Then = detail::noop_t>
-      void execute(Scheduler& sched, dart::packet const& pkt, Then&& next = detail::noop_v) {
+      template <class Scheduler, class Packet = dart::packet, class Then = detail::noop_t>
+      void execute(Scheduler& sched,
+          Packet&& pkt = std::decay_t<Packet>::make_null(), Then&& next = detail::noop_v) {
         // Get a tuple to hold the calculated results.
-        auto state = std::make_shared<execution_storage>(pkt);
+        auto state = std::make_shared<execution_storage<Packet>>(std::forward<Packet>(pkt));
 
         // Statically iterate over each contained node.
         meta::for_each_t<Nodes...>([&] (auto idx, auto) {
@@ -133,12 +139,14 @@ namespace daggr::node {
 
       /*----- Private Types -----*/
 
+      template <class Packet>
       struct execution_storage {
-        explicit execution_storage(dart::packet const& in) :
-          in(in),
+        template <class P>
+        explicit execution_storage(P&& in) :
+          in(std::forward<P>(in)),
           remaining(sizeof...(Nodes))
         {}
-        dart::packet const in;
+        Packet const in;
         std::atomic<int64_t> remaining;
         std::tuple<dart_t<Nodes>...> store;
       };
