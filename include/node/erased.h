@@ -35,6 +35,21 @@ namespace daggr::node {
 
       /*----- Operators -----*/
 
+      template <class Node, class =
+        std::enable_if_t<
+          is_node_v<std::decay_t<Node>>
+          &&
+          !std::is_same_v<
+            std::decay_t<Node>,
+            erased
+          >
+        >
+      >
+      erased& operator =(Node&& node) {
+        impl = std::make_unique<erased_node<std::decay_t<Node>>>(std::forward<Node>(node));
+        return *this;
+      };
+
       erased& operator =(erased const& other) {
         if (this == &other) return *this;
         auto tmp {other};
@@ -65,7 +80,7 @@ namespace daggr::node {
       >
       void execute(Scheduler& sched,
           Packet&& pkt = std::decay_t<Packet>::make_null(), Then&& next = detail::noop_v) {
-        impl->execute(std::forward<Scheduler>(sched), std::forward<Packet>(pkt), std::forward<Then>(next));
+        impl->execute(sched, std::forward<Packet>(pkt), std::forward<Then>(next));
       }
 
       template <class Then>
