@@ -10,9 +10,6 @@
 
 namespace daggr::node {
 
-  template <class F>
-  class comp;
-
   template <class Producer, class Consumer>
   class seq {
 
@@ -90,7 +87,7 @@ namespace daggr::node {
           >
         >
       >
-      explicit seq(P&& prod, C&& cons) :
+      seq(P&& prod, C&& cons) :
         state(
           std::make_shared<storage>(
             detail::normalize(std::forward<P>(prod)),
@@ -120,12 +117,12 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      auto operator ()(Arg&& arg, clock::time_point ts = clock::now()) {
+      auto operator ()(Arg&& arg) {
         sched::eager sched;
         std::optional<apply_result_t<Arg>> opt;
         execute(sched, std::forward<Arg>(arg), [&] (auto&& res) {
           opt.emplace(std::forward<decltype(res)>(res));
-        }, ts);
+        });
         return *std::move(opt);
       }
 
@@ -136,9 +133,9 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      void operator ()(Arg&& arg, clock::time_point ts = clock::now()) {
+      void operator ()(Arg&& arg) {
         sched::eager sched;
-        execute(sched, std::forward<Arg>(arg), detail::noop_v, ts);
+        execute(sched, std::forward<Arg>(arg), detail::noop {});
       }
 
       template <class Arg = meta::none,
@@ -148,12 +145,12 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      auto operator ()(clock::time_point ts = clock::now()) {
+      auto operator ()() {
         sched::eager sched;
         std::optional<apply_result_t<Arg>> opt;
         execute(sched, meta::none_v, [&] (auto&& res) {
           opt.emplace(std::forward<decltype(res)>(res));
-        }, ts);
+        });
         return *std::move(opt);
       }
 
@@ -164,25 +161,27 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      void operator ()(clock::time_point ts = clock::now()) {
+      void operator ()() {
         sched::eager sched;
-        execute(sched, meta::none_v, detail::noop_v, ts);
+        execute(sched, meta::none_v, detail::noop {});
       }
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Input, class Then = detail::noop_t, class =
+      template <class Scheduler, class Input,
+               class Then = detail::noop, class Handler = detail::indirect, class =
         std::enable_if_t<
           is_applicable_v<Input>
         >
       >
-      void execute(Scheduler& sched, Input&& in, Then&& next = detail::noop_v, clock::time_point ts = clock::now()) {
+      void execute(Scheduler& sched, Input&& in,
+          Then&& next = Then {}, Handler&& handler = Handler {}) {
         auto copy = state;
         state->prod.execute(sched, std::forward<Input>(in),
-            [&sched, state = std::move(copy), next = std::forward<Then>(next), ts] (auto&& tmp) mutable {
+            [&sched, state = std::move(copy), next = std::forward<Then>(next), handler] (auto&& tmp) mutable {
           state->cons.execute(sched,
-              std::forward<decltype(tmp)>(tmp), std::move(next), ts);
-        }, ts);
+              std::forward<decltype(tmp)>(tmp), std::move(next), std::move(handler));
+        }, handler);
       }
 
       template <class Then>
@@ -205,12 +204,14 @@ namespace daggr::node {
         return node::all {std::move(*this), std::forward<Nodes>(nodes)...};
       }
 
-      auto window(clock::duration window_size) const& {
-        return node::win {window_size, *this};
+      template <class... Errs, class Then>
+      auto error(Then&& next) const& {
+        return make_err<Errs...>(*this, std::forward<Then>(next));
       }
 
-      auto window(clock::duration window_size) && {
-        return node::win {window_size, std::move(*this)};
+      template <class... Errs, class Then>
+      auto error(Then&& next) && {
+        return make_err<Errs...>(std::move(*this), std::forward<Then>(next));
       }
 
     private:

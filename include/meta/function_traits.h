@@ -16,6 +16,11 @@ namespace daggr::meta {
   struct none {};
   constexpr none none_v {};
 
+  template <class T>
+  struct identity {
+    using type = T;
+  };
+
   // Struct represents a non-fatal error in a context where a valid type cannot be instantiated.
   struct nonesuch {
     nonesuch() = delete;

@@ -10,9 +10,6 @@
 
 namespace daggr::node {
 
-  template <class Producer, class Consumer>
-  class seq;
-
   // FIXME: Make alignment smarter than this.
   template <class Func>
   class alignas(64) comp {
@@ -78,12 +75,12 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      auto operator ()(Arg&& arg, clock::time_point ts = clock::now()) {
+      auto operator ()(Arg&& arg) {
         sched::eager sched;
         std::optional<apply_result_t<Arg>> opt;
         execute(sched, std::forward<Arg>(arg), [&] (auto&& res) {
           opt.emplace(std::forward<decltype(res)>(res));
-        }, ts);
+        });
         return *std::move(opt);
       }
 
@@ -94,9 +91,9 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      void operator ()(Arg&& arg, clock::time_point ts = clock::now()) {
+      void operator ()(Arg&& arg) {
         sched::eager sched;
-        execute(sched, std::forward<Arg>(arg), detail::noop_v, ts);
+        execute(sched, std::forward<Arg>(arg), detail::noop {});
       }
 
       template <class Arg = meta::none,
@@ -106,12 +103,12 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      auto operator ()(clock::time_point ts = clock::now()) {
+      auto operator ()() {
         sched::eager sched;
         std::optional<apply_result_t<Arg>> opt;
         execute(sched, meta::none_v, [&] (auto&& res) {
           opt.emplace(std::forward<decltype(res)>(res));
-        }, ts);
+        });
         return *std::move(opt);
       }
 
@@ -122,20 +119,31 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      void operator ()(clock::time_point ts = clock::now()) {
+      void operator ()() {
         sched::eager sched;
-        execute(sched, meta::none_v, detail::noop_v, ts);
+        execute(sched, meta::none_v, detail::noop {});
       }
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Input, class Then = detail::noop_t, class =
+      template <class Scheduler, class Input,
+               class Then = detail::noop, class Handler = detail::indirect, class =
         std::enable_if_t<
           is_applicable_v<Input>
         >
       >
-      void execute(Scheduler&, Input&& in, Then&& next = detail::noop_v, clock::time_point = clock::now()) {
-        meta::apply(std::forward<Then>(next), meta::apply(func, std::forward<Input>(in)));
+      void execute(Scheduler&, Input&& in,
+          Then&& next = detail::noop {}, Handler&& handler = Handler {}) {
+        std::optional<apply_result_t<Input>> opt;
+        handler(
+          [&] () -> decltype(auto) {
+            return meta::apply(func, std::forward<Input>(in));
+          },
+          [&] (auto&& res) {
+            opt = std::forward<decltype(res)>(res);
+          }
+        );
+        if (opt) meta::apply(std::forward<Then>(next), std::move(*opt));
       }
 
       template <class Then>
@@ -158,12 +166,14 @@ namespace daggr::node {
         return node::all {std::move(*this), std::forward<Nodes>(nodes)...};
       }
 
-      auto window(clock::duration window_size) const& {
-        return node::win {window_size, *this};
+      template <class... Errs, class Then>
+      auto error(Then&& next) const& {
+        return make_err<Errs...>(*this, std::forward<Then>(next));
       }
 
-      auto window(clock::duration window_size) && {
-        return node::win {window_size, std::move(*this)};
+      template <class... Errs, class Then>
+      auto error(Then&& next) && {
+        return make_err<Errs...>(std::move(*this), std::forward<Then>(next));
       }
 
     private:
@@ -210,8 +220,8 @@ namespace daggr::node {
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Then>
-      void execute(Scheduler&, meta::none, Then&& next, clock::time_point = clock::now()) {
+      template <class Scheduler, class Then = detail::noop, class Handler = detail::indirect>
+      void execute(Scheduler&, meta::none, Then&& next = Then {}, Handler&& = Handler {}) {
         std::invoke(std::forward<Then>(next), meta::none_v);
       }
 

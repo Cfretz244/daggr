@@ -4,6 +4,7 @@
 /*----- System Includes -----*/
 
 #include <chrono>
+#include <variant>
 #include <optional>
 #include <functional>
 #include <type_traits>
@@ -20,10 +21,11 @@ namespace daggr {
     class seq;
     template <class...>
     class all;
-    template <class>
-    class win;
+    template <class, class, class...>
+    class err;
 
-    using clock = std::chrono::steady_clock;
+    template <class... Exs, class Comp, class Catch>
+    auto make_err(Comp&& comp, Catch&& handler);
 
   }
 
@@ -35,6 +37,8 @@ namespace daggr {
   struct is_node<node::seq<P, C>> : std::true_type {};
   template <class... Ts>
   struct is_node<node::all<Ts...>> : std::true_type {};
+  template <class Cmp, class Ctch, class... Es>
+  struct is_node<node::err<Cmp, Ctch, Es...>> : std::true_type {};
   template <class T>
   constexpr auto is_node_v = is_node<T>::value;
 
@@ -48,7 +52,7 @@ namespace daggr {
 #include "node/comp.h"
 #include "node/seq.h"
 #include "node/all.h"
-#include "node/win.h"
+#include "node/err.h"
 
 /*----- Globals -----*/
 

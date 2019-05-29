@@ -118,12 +118,12 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      auto operator ()(Arg&& arg, clock::time_point ts = clock::now()) {
+      auto operator ()(Arg&& arg) {
         sched::eager sched;
         std::optional<apply_result_t<Arg>> opt;
         execute(sched, std::forward<Arg>(arg), [&] (auto&& res) {
           opt.emplace(std::forward<decltype(res)>(res));
-        }, ts);
+        });
         return *std::move(opt);
       }
 
@@ -134,9 +134,9 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      void operator ()(Arg&& arg, clock::time_point ts = clock::now()) {
+      void operator ()(Arg&& arg) {
         sched::eager sched;
-        execute(sched, std::forward<Arg>(arg), detail::noop_v, ts);
+        execute(sched, std::forward<Arg>(arg), detail::noop {});
       }
 
       template <class Arg = meta::none,
@@ -146,12 +146,12 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      auto operator ()(clock::time_point ts = clock::now()) {
+      auto operator ()() {
         sched::eager sched;
         std::optional<apply_result_t<Arg>> opt;
         execute(sched, meta::none_v, [&] (auto&& res) {
           opt.emplace(std::forward<decltype(res)>(res));
-        }, ts);
+        });
         return *std::move(opt);
       }
 
@@ -162,19 +162,21 @@ namespace daggr::node {
           is_applicable_v<Arg>
         >* = nullptr
       >
-      void operator ()(clock::time_point ts = clock::now()) {
+      void operator ()() {
         sched::eager sched;
-        execute(sched, meta::none_v, detail::noop_v, ts);
+        execute(sched, meta::none_v, detail::noop {});
       }
 
       /*----- Public API -----*/
 
-      template <class Scheduler, class Input, class Then = detail::noop_t, class =
+      template <class Scheduler, class Input,
+               class Then = detail::noop, class Handler = detail::indirect, class =
         std::enable_if_t<
           is_applicable_v<Input>
         >
       >
-      void execute(Scheduler& sched, Input&& in, Then&& next = detail::noop_v, clock::time_point ts = clock::now()) {
+      void execute(Scheduler& sched, Input&& in,
+          Then&& next = Then {}, Handler&& handler = Handler {}) {
         // Get a tuple to hold the calculated results.
         auto state = std::make_shared<execution_storage<Input>>(std::forward<Input>(in));
 
@@ -182,7 +184,7 @@ namespace daggr::node {
         meta::for_each_t<Nodes...>([&] (auto idx, auto) {
           // Create an intermediate computation to run this node, and schedule it.
           auto copy = nodes;
-          auto intermediate = [nodes = std::move(copy), &sched, state, next, ts] {
+          auto intermediate = [nodes = std::move(copy), &sched, state, next, handler] {
             auto& curr = std::get<decltype(idx) {}>(*nodes);
             curr.execute(sched, state->in, [state = std::move(state), next] (auto&& out) mutable {
               // Write the value in for this node of the computation.
@@ -192,7 +194,7 @@ namespace daggr::node {
               if (state->remaining.fetch_sub(1) == 1) {
                 meta::apply(next, std::move(state->store));
               }
-            }, ts);
+            }, handler);
           };
 
           // If we're working with the final node, yield the current thread and execute
@@ -222,12 +224,14 @@ namespace daggr::node {
         return node::all {std::move(*this), std::forward<Ns>(nodes)...};
       }
 
-      auto window(clock::duration window_size) const& {
-        return node::win {window_size, *this};
+      template <class... Errs, class Then>
+      auto error(Then&& next) const& {
+        return make_err<Errs...>(*this, std::forward<Then>(next));
       }
 
-      auto window(clock::duration window_size) && {
-        return node::win {window_size, std::move(*this)};
+      template <class... Errs, class Then>
+      auto error(Then&& next) && {
+        return make_err<Errs...>(std::move(*this), std::forward<Then>(next));
       }
 
     private:

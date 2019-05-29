@@ -27,9 +27,33 @@ namespace daggr::node::detail {
   template <class Node, class Input>
   using child_apply_result_t = typename child_apply_result<Node, Input>::type;
 
-  // Global empty lambda to use for defaulted parameters.
-  constexpr auto noop_v = [] {};
-  using noop_t = decltype(noop_v) const&;
+  template <class Node, class Input>
+  struct child_has_result :
+    std::conjunction<
+      child_is_applicable<Node, Input>,
+      std::negation<
+        std::is_same<
+          child_apply_result_t<Node, Input>,
+          meta::none
+        >
+      >
+    >
+  {};
+  template <class Node, class Input>
+  static constexpr auto child_has_result_v = child_has_result<Node, Input>::value;
+
+  struct noop {
+    void operator ()() {}
+  };
+  struct indirect {
+    template <class Func, class Succ>
+    static constexpr auto nothrow_indirect_v = noexcept(std::declval<Succ>()(std::declval<Func>()()));
+
+    template <class Func, class Succ>
+    decltype(auto) operator ()(Func&& func, Succ&& succ) const noexcept(nothrow_indirect_v<Func, Succ>) {
+      return std::invoke(std::forward<Succ>(succ), std::invoke(std::forward<Func>(func)));
+    }
+  };
 
   template <class MaybeNode>
   decltype(auto) normalize(MaybeNode&& mnode) {
