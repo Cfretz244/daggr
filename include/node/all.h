@@ -184,11 +184,15 @@ namespace daggr::node {
         meta::for_each_t<Nodes...>([&] (auto idx, auto) {
           // Create an intermediate computation to run this node, and schedule it.
           auto copy = nodes;
-          auto intermediate = [nodes = std::move(copy), &sched, state, next, handler] {
+          auto intermediate = [nodes = std::move(copy), &sched, state, next, handler] () mutable {
+            using result_type = detail::child_apply_result_t<node_idx_t<decltype(idx) {}>, Input const&>;
+
+            // FIXME: Would like to be able to properly forward here,
+            // but I currently need to provide a default argument, which can't be done very easily generically.
             auto& curr = std::get<decltype(idx) {}>(*nodes);
-            curr.execute(sched, state->in, [state = std::move(state), next] (auto&& out) mutable {
+            curr.execute(sched, state->in, [state = std::move(state), next] (result_type out = result_type {}) mutable {
               // Write the value in for this node of the computation.
-              std::get<decltype(idx) {}>(state->store) = std::forward<decltype(out)>(out);
+              std::get<decltype(idx) {}>(state->store) = std::move(out);
 
               // Call into our continuation if we were the final node of the all.
               if (state->remaining.fetch_sub(1) == 1) {
@@ -237,6 +241,9 @@ namespace daggr::node {
     private:
 
       /*----- Private Types -----*/
+
+      template <size_t idx>
+      using node_idx_t = std::tuple_element_t<idx, std::tuple<Nodes...>>;
 
       template <class Input>
       struct execution_storage {

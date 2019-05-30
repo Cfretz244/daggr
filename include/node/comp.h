@@ -192,13 +192,13 @@ namespace daggr::node {
       /*----- Public Types -----*/
 
       template <class Input>
-      struct is_applicable : std::is_same<std::decay_t<Input>, meta::none> {};
+      struct is_applicable : std::true_type {};
       template <class Input>
       static constexpr auto is_applicable_v = is_applicable<Input>::value;
 
-      template <class>
+      template <class T>
       struct apply_result {
-        using type = meta::none;
+        using type = T;
       };
       template <class T>
       using apply_result_t = typename apply_result<T>::type;
@@ -218,11 +218,16 @@ namespace daggr::node {
 
       void operator ()() {}
 
+      template <class Arg>
+      Arg&& operator ()(Arg&& argument) {
+        return std::forward<Arg>(argument);
+      }
+
       /*----- Public API -----*/
 
-      template <class Scheduler, class Then = detail::noop, class Handler = detail::indirect>
-      void execute(Scheduler&, meta::none, Then&& next = Then {}, Handler&& = Handler {}) {
-        std::invoke(std::forward<Then>(next), meta::none_v);
+      template <class Scheduler, class Input, class Then = detail::noop, class Handler = detail::indirect>
+      void execute(Scheduler&, Input&& in, Then&& next = Then {}, Handler&& = Handler {}) {
+        meta::apply(std::forward<Then>(next), std::forward<Input>(in));
       }
 
       template <class Then>

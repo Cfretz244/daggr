@@ -458,7 +458,7 @@ namespace daggr::meta {
   template <class Functor, class Arg>
   struct apply_result {
     template <class F, class A>
-    static decltype(meta::apply(std::declval<Functor>(), std::declval<Arg>())) application_calculation(std::true_type);
+    static decltype(meta::apply(std::declval<F>(), std::declval<A>())) application_calculation(std::true_type);
     template <class, class>
     static nonesuch application_calculation(std::false_type);
     using type = decltype(application_calculation<Functor, Arg>(meta::is_applicable<Functor, Arg> {}));

@@ -176,9 +176,12 @@ namespace daggr::node {
       >
       void execute(Scheduler& sched, Input&& in,
           Then&& next = Then {}, Handler&& handler = Handler {}) {
+        // FIXME: Would like to be able to properly forward here,
+        // but I currently need to provide a default argument, which can't be done very easily generically.
         auto copy = state;
+        using result_type = detail::child_apply_result_t<Producer, Input>;
         state->prod.execute(sched, std::forward<Input>(in),
-            [&sched, state = std::move(copy), next = std::forward<Then>(next), handler] (auto&& tmp) mutable {
+            [&sched, state = std::move(copy), next = std::forward<Then>(next), handler] (result_type tmp = result_type {}) mutable {
           state->cons.execute(sched,
               std::forward<decltype(tmp)>(tmp), std::move(next), std::move(handler));
         }, handler);

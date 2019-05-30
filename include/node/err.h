@@ -45,7 +45,7 @@ namespace daggr::node {
           std::forward<Try>(test)();
         }
       } catch (Ex) {
-        std::forward<Catch>(handler);
+        std::forward<Catch>(handler)();
       }
     }
   }
@@ -207,19 +207,20 @@ namespace daggr::node {
       >
       void execute(Scheduler& sched, Input&& in,
           Then&& next = Then {}, Handler&& handler = Handler {}) {
+        using result_type = apply_result_t<Input>;
+
         // Allocate some execution state to keep track of whether an exception
         // has already been thrown.
-        auto state = std::make_shared<err_state>(std::forward<Input>(in));
+        auto state = std::make_shared<err_state<std::decay_t<Input>>>(std::forward<Input>(in));
 
-        auto adjust = [next = std::forward<Then>(next)] (auto&& val) mutable {
-          apply_result_t<Input> adjusted(std::forward<decltype(val)>(val));
-          std::move(next)(std::move(adjusted));
+        auto adjust = [next = std::forward<Then>(next)] (result_type val = result_type {}) mutable {
+          std::move(next)(std::move(val));
         };
 
         // Setup a handler for the requested exception types.
         auto copy = impl;
         impl->computation.execute(sched, state->in, adjust,
-            [&sched, next, state, impl = std::move(copy),
+            [&sched, adjust, state, impl = std::move(copy),
                 handler = std::forward<Handler>(handler)] (auto&& cb, auto&& succ) mutable {
           detail::try_stack<Exs...>(
             [&] {
@@ -227,7 +228,7 @@ namespace daggr::node {
             },
             [&] {
               if (!state->tripped.test_and_set()) {
-                impl->handler.execute(sched, state->in, adjust, std::move(handler));
+                impl->handler.execute(sched, state->in, std::move(adjust), std::move(handler));
               }
             }
           );
@@ -317,7 +318,7 @@ namespace daggr::node {
 
   template <class... Exs, class Comp, class Catch>
   auto make_err(Comp&& comp, Catch&& handler) {
-    using err_type = err<std::decay_t<Comp>, std::decay_t<Catch>, Exs...>;
+    using err_type = err<detail::normalize_t<Comp>, detail::normalize_t<Catch>, Exs...>;
     return err_type {std::forward<Comp>(comp), std::forward<Catch>(handler)};
   }
 

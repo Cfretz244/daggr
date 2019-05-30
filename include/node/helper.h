@@ -43,7 +43,11 @@ namespace daggr::node::detail {
   static constexpr auto child_has_result_v = child_has_result<Node, Input>::value;
 
   struct noop {
-    void operator ()() {}
+    void operator ()() const noexcept {}
+    template <class Arg>
+    Arg&& operator ()(Arg&& argument) const noexcept {
+      return std::forward<Arg>(argument);
+    }
   };
   struct indirect {
     template <class Func, class Succ>
